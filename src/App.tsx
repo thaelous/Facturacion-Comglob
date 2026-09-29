@@ -35,7 +35,8 @@ import {
   Crosshair,
   ListFilter,
   CalendarRange,
-  Building2
+  Building2,
+  Bell
 } from 'lucide-react';
 import { initializeApp, getApps, getApp } from 'firebase/app';
 import { 
@@ -297,6 +298,7 @@ export interface InvoiceItem {
   documento_relacionado?: string;
   es_hueco_pendiente?: boolean;
   estatus_modificado_manualmente?: boolean;
+  alerta_complemento_descartada?: boolean;
   createdAt?: string;
   updatedAt?: string;
 }
@@ -381,6 +383,7 @@ export default function App() {
   const [showClientsModal, setShowClientsModal] = useState(false);
   const [showCsvModal, setShowCsvModal] = useState(false);
   const [showChartModal, setShowChartModal] = useState(false);
+  const [showUrgentModal, setShowUrgentModal] = useState(false);
 
   // Mountain Chart state
   const [chartCenterDate, setChartCenterDate] = useState<Date>(new Date());
@@ -457,9 +460,35 @@ export default function App() {
             complemento: String(d.complemento || ''),
             documento_relacionado: String(d.documento_relacionado || ''),
             es_hueco_pendiente: Boolean(d.es_hueco_pendiente),
-            estatus_modificado_manualmente: Boolean(d.estatus_modificado_manualmente)
+            estatus_modificado_manualmente: Boolean(d.estatus_modificado_manualmente),
+            alerta_complemento_descartada: Boolean(d.alerta_complemento_descartada)
           });
         });
+
+        // Transición Automática por Vencimiento de Fecha Probable de Pago
+        const todayYMD = toLocalDateString(new Date());
+        const overdueToUpdate = items.filter(inv => {
+          return (
+            inv.fecha_probable_pago &&
+            isValidDate(inv.fecha_probable_pago) &&
+            inv.fecha_probable_pago <= todayYMD &&
+            inv.monto_total > 0 &&
+            (inv.estatus === 'Generado' || inv.estatus === 'Procedimiento terminado') &&
+            !inv.estatus_modificado_manualmente
+          );
+        });
+
+        if (overdueToUpdate.length > 0) {
+          const batch = writeBatch(db);
+          overdueToUpdate.forEach(inv => {
+            batch.update(doc(db, 'invoices', inv.id), {
+              estatus: 'Pagada sin complemento',
+              updatedAt: new Date().toISOString()
+            });
+            inv.estatus = 'Pagada sin complemento';
+          });
+          batch.commit().catch(err => console.error('Error auto-transición vencimiento:', err));
+        }
 
         items.sort((a, b) => {
           const numA = parseInt(a.numero_factura.replace(/\D/g, ''), 10);
@@ -737,6 +766,41 @@ export default function App() {
       countProblema
     };
   }, [periodFilteredInvoices]);
+
+  // Facturas de Atención Urgente (Complementos Pendientes)
+  const urgentInvoices = useMemo(() => {
+    const todayYMD = toLocalDateString(new Date());
+    return invoices.filter(inv => {
+      if (inv.estatus === 'Complemento' || inv.estatus === 'Cancelada' || inv.monto_total <= 0) {
+        return false;
+      }
+      if (inv.alerta_complemento_descartada) {
+        return false;
+      }
+      if (inv.estatus === 'Finalizado') {
+        return false;
+      }
+      const isPagadaSinComp = inv.estatus === 'Pagada sin complemento';
+      const isVencidaSinComp = (
+        inv.fecha_probable_pago &&
+        isValidDate(inv.fecha_probable_pago) &&
+        inv.fecha_probable_pago <= todayYMD
+      );
+      return isPagadaSinComp || isVencidaSinComp;
+    });
+  }, [invoices]);
+
+  const dismissUrgentAlert = async (id: string) => {
+    try {
+      const docRef = doc(db, 'invoices', id);
+      await updateDoc(docRef, {
+        alerta_complemento_descartada: true,
+        updatedAt: new Date().toISOString()
+      });
+    } catch (err) {
+      console.error('Error al descartar alerta de complemento:', err);
+    }
+  };
 
   // Sequence Gap Detection
   const missingFolios = useMemo(() => {
@@ -1690,16 +1754,46 @@ export default function App() {
                 </span>
               </div>
 
-              {/* Buscador global */}
-              <div className="relative w-full md:w-80">
-                <input
-                  type="text"
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  placeholder="Buscar folio, empresa, OC, concepto..."
-                  className="w-full bg-slate-950 border border-slate-700 text-xs text-white rounded-xl pl-9 pr-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-emerald-500 placeholder:text-slate-500"
-                />
-                <Search className="w-4 h-4 text-slate-400 absolute left-3 top-3" />
+              {/* Grupo Buscador y Botón Atención Urgente */}
+              <div className="flex items-center gap-2.5 w-full md:w-auto">
+                <button
+                  type="button"
+                  onClick={() => setShowUrgentModal(true)}
+                  className={`px-3.5 py-2.5 rounded-xl text-xs font-bold border flex items-center gap-2 transition-all shadow-sm cursor-pointer whitespace-nowrap ${
+                    urgentInvoices.length > 0
+                      ? 'bg-amber-950/40 hover:bg-amber-900/60 border-amber-500/50 text-amber-200 shadow-amber-950/50 ring-1 ring-amber-500/30'
+                      : 'bg-slate-800/90 hover:bg-slate-800 border-slate-700/80 text-slate-400'
+                  }`}
+                  title="Ver facturas que requieren complemento de pago"
+                >
+                  {urgentInvoices.length > 0 ? (
+                    <AlertTriangle className="w-4 h-4 text-amber-400 animate-pulse" />
+                  ) : (
+                    <Bell className="w-4 h-4 text-slate-400" />
+                  )}
+                  <span>Atención Urgente</span>
+                  <span
+                    className={`px-2 py-0.5 rounded-full text-[11px] font-black ${
+                      urgentInvoices.length > 0
+                        ? 'bg-amber-500 text-slate-950'
+                        : 'bg-slate-700 text-slate-400'
+                    }`}
+                  >
+                    {urgentInvoices.length}
+                  </span>
+                </button>
+
+                {/* Buscador global */}
+                <div className="relative w-full md:w-80">
+                  <input
+                    type="text"
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    placeholder="Buscar folio, empresa, OC, concepto..."
+                    className="w-full bg-slate-950 border border-slate-700 text-xs text-white rounded-xl pl-9 pr-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-emerald-500 placeholder:text-slate-500"
+                  />
+                  <Search className="w-4 h-4 text-slate-400 absolute left-3 top-3" />
+                </div>
               </div>
             </div>
 
@@ -2576,6 +2670,113 @@ export default function App() {
                   setShowEmpresaFilterModal(false);
                   setEmpresaSearchQuery('');
                 }}
+                className="px-4 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl cursor-pointer"
+              >
+                Cerrar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: ATENCIÓN URGENTE (COMPLEMENTOS PENDIENTES) */}
+      {showUrgentModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/85 backdrop-blur-md p-4 overflow-y-auto">
+          <div className="bg-slate-900 border border-slate-800 rounded-3xl max-w-3xl w-full p-6 shadow-2xl space-y-4 my-8 max-h-[88vh] flex flex-col">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-800 shrink-0">
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 bg-amber-950 border border-amber-500/40 rounded-xl flex items-center justify-center text-amber-400">
+                  <AlertTriangle className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-white flex items-center gap-2">
+                    <span>Atención Urgente: Complementos Pendientes</span>
+                    <span className="px-2 py-0.5 bg-amber-500 text-slate-950 rounded-full text-xs font-black">
+                      {urgentInvoices.length}
+                    </span>
+                  </h3>
+                  <p className="text-xs text-slate-400">
+                    Facturas pagadas o con fecha vencida que requieren emisión de complemento de pago CFDI
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowUrgentModal(false)}
+                className="text-slate-400 hover:text-white p-1.5 rounded-lg hover:bg-slate-800 cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Lista de facturas urgentes */}
+            <div className="overflow-y-auto flex-1 space-y-2 pr-1 min-h-[220px]">
+              {urgentInvoices.length === 0 ? (
+                <div className="py-12 text-center text-slate-500 flex flex-col items-center justify-center gap-2">
+                  <CheckCircle2 className="w-10 h-10 text-emerald-500/60 mb-1" />
+                  <p className="text-sm font-semibold text-slate-300">¡Al día! No hay complementos pendientes</p>
+                  <p className="text-xs text-slate-500">
+                    Todas las facturas cobradas cuentan con su complemento CFDI o fueron descartadas.
+                  </p>
+                </div>
+              ) : (
+                urgentInvoices.map((inv) => (
+                  <div
+                    key={inv.id}
+                    className="flex items-center justify-between p-3 rounded-2xl bg-slate-950/70 border border-slate-800 hover:border-amber-500/40 transition-all gap-3"
+                  >
+                    <div className="flex items-center gap-3 min-w-0">
+                      <span className="font-bold text-white px-2.5 py-1 bg-slate-800 rounded-lg border border-slate-700/80 text-xs font-mono shrink-0">
+                        {inv.numero_factura || 'S/N'}
+                      </span>
+                      <div className="min-w-0">
+                        <div className="text-xs font-bold text-slate-200 truncate" title={inv.empresa}>
+                          {inv.empresa || 'Cliente sin nombre'}
+                        </div>
+                        <div className="text-[11px] text-slate-400 flex items-center gap-2 mt-0.5">
+                          <span>
+                            Pago: <strong className="text-amber-300 font-mono">{inv.fecha_probable_pago || 'Vencida'}</strong>
+                          </span>
+                          <span>•</span>
+                          <span className="text-slate-500 font-mono">
+                            {inv.orden_de_compra ? `OC: ${inv.orden_de_compra}` : 'Sin OC'}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-3 shrink-0">
+                      <div className="text-right">
+                        <div className="text-xs font-black font-mono text-emerald-400">
+                          {formatCurrency(inv.monto_total)}
+                        </div>
+                        <span className="inline-block px-1.5 py-0.5 rounded text-[10px] font-semibold bg-amber-950/80 text-amber-300 border border-amber-800/60 mt-0.5">
+                          {inv.estatus}
+                        </span>
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={() => dismissUrgentAlert(inv.id)}
+                        className="p-1.5 text-slate-500 hover:text-rose-400 hover:bg-slate-800 rounded-lg transition-colors cursor-pointer"
+                        title="Descartar aviso para esta factura"
+                      >
+                        <X className="w-4 h-4" />
+                      </button>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+
+            <div className="pt-3 border-t border-slate-800 flex items-center justify-between text-xs text-slate-400 shrink-0">
+              <span className="font-medium text-slate-300">
+                Monto total pendiente:{' '}
+                {formatCurrency(urgentInvoices.reduce((acc, curr) => acc + curr.monto_total, 0))}
+              </span>
+              <button
+                type="button"
+                onClick={() => setShowUrgentModal(false)}
                 className="px-4 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl cursor-pointer"
               >
                 Cerrar

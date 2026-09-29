@@ -392,15 +392,30 @@
               </span>
             </div>
 
-            <!-- Buscador Global Inmediato -->
-            <div class="relative w-full md:w-80">
-              <input 
-                type="text" 
-                id="searchInvoiceInput" 
-                placeholder="Buscar por folio, cliente, OC, concepto..." 
-                class="w-full bg-slate-950 border border-slate-700 text-xs text-white rounded-xl pl-9 pr-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-emerald-500 placeholder:text-slate-500 transition-all"
-              />
-              <i data-lucide="search" class="w-4 h-4 text-slate-400 absolute left-3 top-3"></i>
+            <!-- Grupo Buscador y Botón Atención Urgente -->
+            <div class="flex items-center gap-2.5 w-full md:w-auto">
+              <!-- Botón Atención Urgente con badge dinámico -->
+              <button 
+                id="openUrgentModalBtn"
+                type="button"
+                class="px-3.5 py-2.5 rounded-xl text-xs font-bold border flex items-center gap-2 transition-all shadow-sm cursor-pointer whitespace-nowrap bg-slate-800/90 hover:bg-slate-800 border-slate-700/80 text-slate-400"
+                title="Ver facturas que requieren complemento de pago"
+              >
+                <i data-lucide="bell" id="urgentBtnIcon" class="w-4 h-4 text-slate-400"></i>
+                <span>Atención Urgente</span>
+                <span id="urgentBtnBadge" class="px-2 py-0.5 rounded-full text-[11px] font-black bg-slate-700 text-slate-400">0</span>
+              </button>
+
+              <!-- Buscador Global Inmediato -->
+              <div class="relative w-full md:w-80">
+                <input 
+                  type="text" 
+                  id="searchInvoiceInput" 
+                  placeholder="Buscar folio, empresa, OC..." 
+                  class="w-full bg-slate-950 border border-slate-700 text-xs text-white rounded-xl pl-9 pr-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-emerald-500 placeholder:text-slate-500 transition-all"
+                />
+                <i data-lucide="search" class="w-4 h-4 text-slate-400 absolute left-3 top-3"></i>
+              </div>
             </div>
           </div>
 
@@ -856,6 +871,45 @@
     </div>
   </div>
 
+  <!-- ==================== MODAL: ATENCIÓN URGENTE (COMPLEMENTOS PENDIENTES) ==================== -->
+  <div id="urgentAttentionModal" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-slate-950/85 backdrop-blur-md p-4 overflow-y-auto">
+    <div class="bg-slate-900 border border-slate-800 rounded-3xl max-w-3xl w-full p-6 shadow-2xl space-y-4 my-8 max-h-[88vh] flex flex-col">
+      <div class="flex items-center justify-between pb-3 border-b border-slate-800 shrink-0">
+        <div class="flex items-center gap-2.5">
+          <div class="w-9 h-9 bg-amber-950 border border-amber-500/40 rounded-xl flex items-center justify-center text-amber-400">
+            <i data-lucide="alert-triangle" class="w-5 h-5"></i>
+          </div>
+          <div>
+            <h3 class="text-base font-bold text-white flex items-center gap-2">
+              <span>Atención Urgente: Complementos Pendientes</span>
+              <span id="urgentModalCountBadge" class="px-2 py-0.5 bg-amber-500 text-slate-950 rounded-full text-xs font-black">0</span>
+            </h3>
+            <p class="text-xs text-slate-400">Facturas pagadas o con fecha vencida que requieren emisión de complemento de pago CFDI</p>
+          </div>
+        </div>
+        <button id="closeUrgentModalBtn" class="text-slate-400 hover:text-white p-1.5 rounded-lg hover:bg-slate-800 cursor-pointer">
+          <i data-lucide="x" class="w-5 h-5"></i>
+        </button>
+      </div>
+
+      <!-- Lista de facturas urgentes -->
+      <div id="urgentInvoicesList" class="overflow-y-auto flex-1 space-y-2 pr-1 min-h-[220px]">
+        <!-- Generado dinámicamente -->
+      </div>
+
+      <div class="pt-3 border-t border-slate-800 flex items-center justify-between text-xs text-slate-400 shrink-0">
+        <span id="urgentModalTotalAmount" class="font-medium text-slate-300">Monto total pendiente: $0.00</span>
+        <button 
+          id="closeUrgentModalFooterBtn"
+          type="button" 
+          class="px-4 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl cursor-pointer"
+        >
+          Cerrar
+        </button>
+      </div>
+    </div>
+  </div>
+
   <!-- ==================== LÓGICA JAVASCRIPT CON FIREBASE MODULAR (CDN) ==================== -->
   <script type="module">
     import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.14.1/firebase-app.js';
@@ -1087,9 +1141,13 @@
             complemento: String(d.complemento || ''),
             documento_relacionado: String(d.documento_relacionado || ''),
             es_hueco_pendiente: Boolean(d.es_hueco_pendiente),
-            estatus_modificado_manualmente: Boolean(d.estatus_modificado_manualmente)
+            estatus_modificado_manualmente: Boolean(d.estatus_modificado_manualmente),
+            alerta_complemento_descartada: Boolean(d.alerta_complemento_descartada)
           });
         });
+
+        // 1. Transición Automática por Vencimiento de Fecha Probable de Pago
+        await checkAndApplyOverdueTransitions(items);
 
         items.sort((a, b) => {
           const numA = parseInt(a.numero_factura.replace(/\D/g, ''), 10);
@@ -1127,10 +1185,168 @@
       });
     }
 
+    // 1. Transición Automática por Vencimiento de Fecha Probable de Pago
+    async function checkAndApplyOverdueTransitions(items) {
+      const todayYMD = toLocalDateString(new Date());
+      const toUpdate = items.filter(inv => {
+        return (
+          inv.fecha_probable_pago &&
+          isValidDate(inv.fecha_probable_pago) &&
+          inv.fecha_probable_pago <= todayYMD &&
+          inv.monto_total > 0 &&
+          (inv.estatus === 'Generado' || inv.estatus === 'Procedimiento terminado') &&
+          !inv.estatus_modificado_manualmente
+        );
+      });
+
+      if (toUpdate.length === 0) return;
+
+      try {
+        const batch = writeBatch(db);
+        toUpdate.forEach(inv => {
+          batch.update(doc(db, 'invoices', inv.id), {
+            estatus: 'Pagada sin complemento',
+            updatedAt: new Date().toISOString()
+          });
+          inv.estatus = 'Pagada sin complemento';
+        });
+        await batch.commit();
+      } catch (err) {
+        console.error('Error aplicando transición automática a "Pagada sin complemento":', err);
+      }
+    }
+
+    // 2. Control de Alerta de Atención Urgente (Complementos Pendientes)
+    function getUrgentInvoices() {
+      const todayYMD = toLocalDateString(new Date());
+      return invoices.filter(inv => {
+        if (inv.estatus === 'Complemento' || inv.estatus === 'Cancelada' || inv.monto_total <= 0) {
+          return false;
+        }
+        if (inv.alerta_complemento_descartada) {
+          return false;
+        }
+        // Si ya tiene complemento asociado (estatus Finalizado), no alertar
+        if (inv.estatus === 'Finalizado') {
+          return false;
+        }
+        const isPagadaSinComp = inv.estatus === 'Pagada sin complemento';
+        const isVencidaSinComp = (
+          inv.fecha_probable_pago &&
+          isValidDate(inv.fecha_probable_pago) &&
+          inv.fecha_probable_pago <= todayYMD
+        );
+        return isPagadaSinComp || isVencidaSinComp;
+      });
+    }
+
+    function renderUrgentAttention() {
+      const urgentList = getUrgentInvoices();
+      const count = urgentList.length;
+
+      const btn = document.getElementById('openUrgentModalBtn');
+      const badge = document.getElementById('urgentBtnBadge');
+      const icon = document.getElementById('urgentBtnIcon');
+
+      if (btn && badge && icon) {
+        badge.textContent = count;
+        if (count > 0) {
+          btn.className = 'px-3.5 py-2.5 rounded-xl text-xs font-bold border flex items-center gap-2 transition-all shadow-md cursor-pointer whitespace-nowrap bg-amber-950/40 hover:bg-amber-900/60 border-amber-500/50 text-amber-200 shadow-amber-950/50 ring-1 ring-amber-500/30';
+          badge.className = 'px-2 py-0.5 rounded-full text-[11px] font-black bg-amber-500 text-slate-950';
+          icon.className = 'w-4 h-4 text-amber-400 animate-pulse';
+        } else {
+          btn.className = 'px-3.5 py-2.5 rounded-xl text-xs font-bold border flex items-center gap-2 transition-all shadow-sm cursor-pointer whitespace-nowrap bg-slate-800/90 hover:bg-slate-800 border-slate-700/80 text-slate-400';
+          badge.className = 'px-2 py-0.5 rounded-full text-[11px] font-black bg-slate-700 text-slate-400';
+          icon.className = 'w-4 h-4 text-slate-400';
+        }
+      }
+
+      const listContainer = document.getElementById('urgentInvoicesList');
+      const modalCount = document.getElementById('urgentModalCountBadge');
+      const modalTotal = document.getElementById('urgentModalTotalAmount');
+
+      if (modalCount) modalCount.textContent = count;
+
+      if (listContainer) {
+        if (count === 0) {
+          listContainer.innerHTML = `
+            <div class="py-12 text-center text-slate-500 flex flex-col items-center justify-center gap-2">
+              <i data-lucide="check-circle-2" class="w-10 h-10 text-emerald-500/60 mb-1"></i>
+              <p class="text-sm font-semibold text-slate-300">¡Al día! No hay complementos pendientes</p>
+              <p class="text-xs text-slate-500">Todas las facturas cobradas cuentan con su complemento CFDI o fueron descartadas.</p>
+            </div>
+          `;
+          if (modalTotal) modalTotal.textContent = 'Monto total pendiente: $0.00';
+        } else {
+          const totalAmount = urgentList.reduce((acc, curr) => acc + curr.monto_total, 0);
+          if (modalTotal) {
+            modalTotal.textContent = `Monto total pendiente: ${new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN' }).format(totalAmount)}`;
+          }
+
+          listContainer.innerHTML = urgentList.map(inv => {
+            return `
+              <div class="flex items-center justify-between p-3 rounded-2xl bg-slate-950/70 border border-slate-800 hover:border-amber-500/40 transition-all gap-3">
+                <div class="flex items-center gap-3 min-w-0">
+                  <span class="font-bold text-white px-2.5 py-1 bg-slate-800 rounded-lg border border-slate-700/80 text-xs font-mono shrink-0">
+                    ${inv.numero_factura || 'S/N'}
+                  </span>
+                  <div class="min-w-0">
+                    <div class="text-xs font-bold text-slate-200 truncate" title="${inv.empresa}">
+                      ${inv.empresa || 'Cliente sin nombre'}
+                    </div>
+                    <div class="text-[11px] text-slate-400 flex items-center gap-2 mt-0.5">
+                      <span>Pago: <strong class="text-amber-300 font-mono">${inv.fecha_probable_pago || 'Vencida'}</strong></span>
+                      <span>•</span>
+                      <span class="text-slate-500 font-mono">${inv.orden_de_compra ? `OC: ${inv.orden_de_compra}` : 'Sin OC'}</span>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="flex items-center gap-3 shrink-0">
+                  <div class="text-right">
+                    <div class="text-xs font-black font-mono text-emerald-400">
+                      ${new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN' }).format(inv.monto_total)}
+                    </div>
+                    <span class="inline-block px-1.5 py-0.5 rounded text-[10px] font-semibold bg-amber-950/80 text-amber-300 border border-amber-800/60 mt-0.5">
+                      ${inv.estatus}
+                    </span>
+                  </div>
+
+                  <button 
+                    type="button"
+                    onclick="window.dismissUrgentAlert('${inv.id}')"
+                    class="p-1.5 text-slate-500 hover:text-rose-400 hover:bg-slate-800 rounded-lg transition-colors cursor-pointer"
+                    title="Descartar aviso para esta factura"
+                  >
+                    <i data-lucide="x" class="w-4 h-4"></i>
+                  </button>
+                </div>
+              </div>
+            `;
+          }).join('');
+        }
+      }
+
+      if (window.lucide) lucide.createIcons();
+    }
+
+    window.dismissUrgentAlert = async (id) => {
+      try {
+        const docRef = doc(db, 'invoices', id);
+        await updateDoc(docRef, {
+          alerta_complemento_descartada: true,
+          updatedAt: new Date().toISOString()
+        });
+      } catch (err) {
+        console.error('Error al descartar alerta de complemento:', err);
+      }
+    };
+
     // 3. RENDERIZADO GLOBAL
     function renderAll() {
       renderMetrics();
       renderSequenceAlert();
+      renderUrgentAttention();
       populateEmpresaFilter();
       renderTable();
       renderCalendar();
@@ -2076,6 +2292,25 @@
     const calPrevMonthBtn = document.getElementById('calPrevMonthBtn');
     const calNextMonthBtn = document.getElementById('calNextMonthBtn');
     const calTodayBtn = document.getElementById('calTodayBtn');
+
+    // Control de Modal Atención Urgente
+    const openUrgentModalBtn = document.getElementById('openUrgentModalBtn');
+    const closeUrgentModalBtn = document.getElementById('closeUrgentModalBtn');
+    const closeUrgentModalFooterBtn = document.getElementById('closeUrgentModalFooterBtn');
+    const urgentAttentionModal = document.getElementById('urgentAttentionModal');
+
+    if (openUrgentModalBtn) {
+      openUrgentModalBtn.addEventListener('click', () => {
+        urgentAttentionModal.classList.remove('hidden');
+        renderUrgentAttention();
+      });
+    }
+    if (closeUrgentModalBtn) {
+      closeUrgentModalBtn.addEventListener('click', () => urgentAttentionModal.classList.add('hidden'));
+    }
+    if (closeUrgentModalFooterBtn) {
+      closeUrgentModalFooterBtn.addEventListener('click', () => urgentAttentionModal.classList.add('hidden'));
+    }
 
     openCalendarBtn.addEventListener('click', () => {
       calendarModal.classList.remove('hidden');
