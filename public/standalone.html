@@ -1551,7 +1551,7 @@
                     <!-- Selector Día -->
                     <select 
                       id="date-day-${inv.id}"
-                      onchange="window.handleTripleDateChange('${inv.id}')"
+                      onchange="window.updateCompoundDate('${inv.id}')"
                       class="bg-slate-950 border border-slate-700/80 rounded px-1.5 py-1 text-xs text-slate-200 focus:outline-none focus:ring-1 focus:ring-emerald-500 cursor-pointer font-mono hover:border-slate-500 transition-colors"
                       title="Día de pago"
                     >
@@ -1562,7 +1562,7 @@
                     <!-- Selector Mes -->
                     <select 
                       id="date-month-${inv.id}"
-                      onchange="window.handleTripleDateChange('${inv.id}')"
+                      onchange="window.updateCompoundDate('${inv.id}')"
                       class="bg-slate-950 border border-slate-700/80 rounded px-1.5 py-1 text-xs text-slate-200 focus:outline-none focus:ring-1 focus:ring-emerald-500 cursor-pointer font-mono hover:border-slate-500 transition-colors"
                       title="Mes de pago"
                     >
@@ -1573,7 +1573,7 @@
                     <!-- Selector Año -->
                     <select 
                       id="date-year-${inv.id}"
-                      onchange="window.handleTripleDateChange('${inv.id}')"
+                      onchange="window.updateCompoundDate('${inv.id}')"
                       class="bg-slate-950 border border-slate-700/80 rounded px-1.5 py-1 text-xs text-slate-200 focus:outline-none focus:ring-1 focus:ring-emerald-500 cursor-pointer font-mono hover:border-slate-500 transition-colors"
                       title="Año de pago"
                     >
@@ -1584,7 +1584,7 @@
                     ${hasFullDate ? `
                       <button 
                         type="button" 
-                        onclick="window.clearTripleDate('${inv.id}')"
+                        onclick="window.clearCompoundDate('${inv.id}')"
                         class="p-1 text-slate-500 hover:text-rose-400 rounded transition-colors cursor-pointer"
                         title="Limpiar fecha"
                       >
@@ -1646,35 +1646,58 @@
       if (window.lucide) lucide.createIcons();
     }
 
-    // Manejador de cambio para los 3 selectores independientes (Día, Mes, Año)
-    window.handleTripleDateChange = async (id) => {
-      const dayEl = document.getElementById(`date-day-${id}`);
-      const monthEl = document.getElementById(`date-month-${id}`);
-      const yearEl = document.getElementById(`date-year-${id}`);
-      if (!dayEl || !monthEl || !yearEl) return;
+    // 1. Modificar la función que actualiza la fecha compuesta (Día, Mes, Año)
+    window.updateCompoundDate = async (id) => {
+      const daySelect = document.getElementById(`date-day-${id}`);
+      const monthSelect = document.getElementById(`date-month-${id}`);
+      const yearSelect = document.getElementById(`date-year-${id}`);
+      if (!daySelect || !monthSelect || !yearSelect) return;
 
-      const day = dayEl.value;
-      const month = monthEl.value;
-      const year = yearEl.value;
+      const day = daySelect.value;
+      const month = monthSelect.value;
+      const year = yearSelect.value;
 
-      // Si los tres selectores están seleccionados, concatenar en formato estándar YYYY-MM-DD
-      if (year && month && day) {
-        const fullDate = `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`;
-        await window.updateField(id, 'fecha_probable_pago', fullDate);
-      } else if (!year && !month && !day) {
-        await window.updateField(id, 'fecha_probable_pago', '');
+      // REGLA ESTRICTA: Si alguno de los tres selectores está en blanco o en su opción por defecto, NO llamar a Firestore
+      if (!day || !month || !year) {
+        return;
+      }
+
+      // Solo cuando los TRES campos contengan un valor válido, se concatena y se guarda en Firestore
+      const fullDate = `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`;
+      try {
+        const docRef = doc(db, 'invoices', id);
+        await updateDoc(docRef, {
+          fecha_probable_pago: fullDate,
+          updatedAt: new Date().toISOString()
+        });
+      } catch (err) {
+        console.error('Error al actualizar fecha compuesta en Firestore:', err);
       }
     };
 
-    window.clearTripleDate = async (id) => {
-      const dayEl = document.getElementById(`date-day-${id}`);
-      const monthEl = document.getElementById(`date-month-${id}`);
-      const yearEl = document.getElementById(`date-year-${id}`);
-      if (dayEl) dayEl.value = '';
-      if (monthEl) monthEl.value = '';
-      if (yearEl) yearEl.value = '';
-      await window.updateField(id, 'fecha_probable_pago', '');
+    // 2. Botón de borrado rápido (×): limpia los tres campos y guarda cadena vacía en Firestore
+    window.clearCompoundDate = async (id) => {
+      const daySelect = document.getElementById(`date-day-${id}`);
+      const monthSelect = document.getElementById(`date-month-${id}`);
+      const yearSelect = document.getElementById(`date-year-${id}`);
+      if (daySelect) daySelect.value = '';
+      if (monthSelect) monthSelect.value = '';
+      if (yearSelect) yearSelect.value = '';
+
+      try {
+        const docRef = doc(db, 'invoices', id);
+        await updateDoc(docRef, {
+          fecha_probable_pago: '',
+          updatedAt: new Date().toISOString()
+        });
+      } catch (err) {
+        console.error('Error al limpiar fecha en Firestore:', err);
+      }
     };
+
+    // Compatibilidad retroactiva
+    window.handleTripleDateChange = window.updateCompoundDate;
+    window.clearTripleDate = window.clearCompoundDate;
 
     window.updateField = async (id, field, value) => {
       try {

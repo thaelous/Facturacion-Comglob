@@ -133,6 +133,110 @@ export const DATE_MONTHS = [
 ];
 export const DATE_YEARS = ['2025', '2026', '2027', '2028', '2029', '2030'];
 
+interface CompoundDateSelectorProps {
+  id: string;
+  value: string;
+  onSave: (dateStr: string) => void;
+}
+
+const CompoundDateSelector: React.FC<CompoundDateSelectorProps> = ({ id, value, onSave }) => {
+  const parts = parseDateParts(value);
+  const [selectedDay, setSelectedDay] = useState(parts.day);
+  const [selectedMonth, setSelectedMonth] = useState(parts.month);
+  const [selectedYear, setSelectedYear] = useState(parts.year);
+
+  useEffect(() => {
+    const p = parseDateParts(value);
+    setSelectedDay(p.day);
+    setSelectedMonth(p.month);
+    setSelectedYear(p.year);
+  }, [value]);
+
+  const handleDayChange = (newDay: string) => {
+    setSelectedDay(newDay);
+    if (newDay && selectedMonth && selectedYear) {
+      onSave(`${selectedYear}-${selectedMonth.padStart(2, '0')}-${newDay.padStart(2, '0')}`);
+    }
+  };
+
+  const handleMonthChange = (newMonth: string) => {
+    setSelectedMonth(newMonth);
+    if (selectedDay && newMonth && selectedYear) {
+      onSave(`${selectedYear}-${newMonth.padStart(2, '0')}-${selectedDay.padStart(2, '0')}`);
+    }
+  };
+
+  const handleYearChange = (newYear: string) => {
+    setSelectedYear(newYear);
+    if (selectedDay && selectedMonth && newYear) {
+      onSave(`${newYear}-${selectedMonth.padStart(2, '0')}-${selectedDay.padStart(2, '0')}`);
+    }
+  };
+
+  const handleClear = () => {
+    setSelectedDay('');
+    setSelectedMonth('');
+    setSelectedYear('');
+    onSave('');
+  };
+
+  const hasFullDate = Boolean(selectedDay && selectedMonth && selectedYear);
+
+  return (
+    <div className="flex items-center gap-1">
+      <select
+        id={`date-day-${id}`}
+        value={selectedDay}
+        onChange={(e) => handleDayChange(e.target.value)}
+        className="bg-slate-950 border border-slate-700/80 rounded px-1.5 py-1 text-xs text-slate-200 focus:outline-none focus:ring-1 focus:ring-emerald-500 cursor-pointer font-mono hover:border-slate-500 transition-colors"
+        title="Día de pago"
+      >
+        <option value="">Día</option>
+        {DATE_DAYS.map((d) => (
+          <option key={d} value={d}>{d}</option>
+        ))}
+      </select>
+
+      <select
+        id={`date-month-${id}`}
+        value={selectedMonth}
+        onChange={(e) => handleMonthChange(e.target.value)}
+        className="bg-slate-950 border border-slate-700/80 rounded px-1.5 py-1 text-xs text-slate-200 focus:outline-none focus:ring-1 focus:ring-emerald-500 cursor-pointer font-mono hover:border-slate-500 transition-colors"
+        title="Mes de pago"
+      >
+        <option value="">Mes</option>
+        {DATE_MONTHS.map((m) => (
+          <option key={m.val} value={m.val}>{m.label}</option>
+        ))}
+      </select>
+
+      <select
+        id={`date-year-${id}`}
+        value={selectedYear}
+        onChange={(e) => handleYearChange(e.target.value)}
+        className="bg-slate-950 border border-slate-700/80 rounded px-1.5 py-1 text-xs text-slate-200 focus:outline-none focus:ring-1 focus:ring-emerald-500 cursor-pointer font-mono hover:border-slate-500 transition-colors"
+        title="Año de pago"
+      >
+        <option value="">Año</option>
+        {DATE_YEARS.map((y) => (
+          <option key={y} value={y}>{y}</option>
+        ))}
+      </select>
+
+      {hasFullDate && (
+        <button
+          type="button"
+          onClick={handleClear}
+          className="p-1 text-slate-500 hover:text-rose-400 rounded transition-colors cursor-pointer"
+          title="Limpiar fecha"
+        >
+          <X className="w-3.5 h-3.5" />
+        </button>
+      )}
+    </div>
+  );
+};
+
 // Convertidor robusto para fechas de Excel / CSV
 function parseExcelDate(val: any): string {
   if (!val) return '';
@@ -1868,76 +1972,11 @@ export default function App() {
 
                         {/* 7. Fecha Probable de Pago (3 Selectores: Día, Mes, Año) */}
                         <td className="py-2.5 px-3 whitespace-nowrap">
-                          {(() => {
-                            const { year: curYear, month: curMonth, day: curDay } = parseDateParts(inv.fecha_probable_pago);
-                            const hasFullDate = Boolean(curYear && curMonth && curDay);
-
-                            const handlePartChange = (part: 'year' | 'month' | 'day', val: string) => {
-                              const newY = part === 'year' ? val : curYear;
-                              const newM = part === 'month' ? val : curMonth;
-                              const newD = part === 'day' ? val : curDay;
-
-                              if (newY && newM && newD) {
-                                updateInvoiceField(inv.id, 'fecha_probable_pago', `${newY}-${newM.padStart(2, '0')}-${newD.padStart(2, '0')}`);
-                              } else if (!newY && !newM && !newD) {
-                                updateInvoiceField(inv.id, 'fecha_probable_pago', '');
-                              }
-                            };
-
-                            return (
-                              <div className="flex items-center gap-1">
-                                {/* Selector Día */}
-                                <select
-                                  value={curDay}
-                                  onChange={(e) => handlePartChange('day', e.target.value)}
-                                  className="bg-slate-950 border border-slate-700/80 rounded px-1.5 py-1 text-xs text-slate-200 focus:outline-none focus:ring-1 focus:ring-emerald-500 cursor-pointer font-mono hover:border-slate-500 transition-colors"
-                                  title="Día de pago"
-                                >
-                                  <option value="">Día</option>
-                                  {DATE_DAYS.map((d) => (
-                                    <option key={d} value={d}>{d}</option>
-                                  ))}
-                                </select>
-
-                                {/* Selector Mes */}
-                                <select
-                                  value={curMonth}
-                                  onChange={(e) => handlePartChange('month', e.target.value)}
-                                  className="bg-slate-950 border border-slate-700/80 rounded px-1.5 py-1 text-xs text-slate-200 focus:outline-none focus:ring-1 focus:ring-emerald-500 cursor-pointer font-mono hover:border-slate-500 transition-colors"
-                                  title="Mes de pago"
-                                >
-                                  <option value="">Mes</option>
-                                  {DATE_MONTHS.map((m) => (
-                                    <option key={m.val} value={m.val}>{m.label}</option>
-                                  ))}
-                                </select>
-
-                                {/* Selector Año */}
-                                <select
-                                  value={curYear}
-                                  onChange={(e) => handlePartChange('year', e.target.value)}
-                                  className="bg-slate-950 border border-slate-700/80 rounded px-1.5 py-1 text-xs text-slate-200 focus:outline-none focus:ring-1 focus:ring-emerald-500 cursor-pointer font-mono hover:border-slate-500 transition-colors"
-                                  title="Año de pago"
-                                >
-                                  <option value="">Año</option>
-                                  {DATE_YEARS.map((y) => (
-                                    <option key={y} value={y}>{y}</option>
-                                  ))}
-                                </select>
-
-                                {hasFullDate && (
-                                  <button
-                                    type="button"
-                                    onClick={() => updateInvoiceField(inv.id, 'fecha_probable_pago', '')}
-                                    className="p-1 text-slate-500 hover:text-rose-400 rounded transition-colors cursor-pointer"
-                                    title="Limpiar fecha"
-                                  >
-                                    <X className="w-3.5 h-3.5" />
-                                  </button>
-                                )}
-                              </div>
-                            );
-                          })()}
+                          <CompoundDateSelector
+                            id={inv.id}
+                            value={inv.fecha_probable_pago}
+                            onSave={(dateStr) => updateInvoiceField(inv.id, 'fecha_probable_pago', dateStr)}
+                          />
                         </td>
 
                         {/* 8. Estatus */}
