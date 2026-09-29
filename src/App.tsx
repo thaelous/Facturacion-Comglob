@@ -34,7 +34,8 @@ import {
   TrendingUp,
   Crosshair,
   ListFilter,
-  CalendarRange
+  CalendarRange,
+  Building2
 } from 'lucide-react';
 import { initializeApp, getApps, getApp } from 'firebase/app';
 import { 
@@ -82,25 +83,75 @@ function toLocalDateString(d: Date): string {
   return `${year}-${month}-${day}`;
 }
 
+// Validación estricta de fecha ISO (YYYY-MM-DD con año de 4 dígitos entre 1900 y 2099)
+export function isValidDate(dateStr: any): boolean {
+  if (!dateStr || typeof dateStr !== 'string') return false;
+  const trimmed = dateStr.trim();
+  const regex = /^(19|20)\d{2}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/;
+  return regex.test(trimmed);
+}
+
+export function sanitizeIsoDate(val: any): string {
+  if (!val || typeof val !== 'string') return '';
+  const trimmed = val.trim();
+  if (isValidDate(trimmed)) return trimmed;
+  // Si viene en formato DD/MM/AAAA o DD-MM-AAAA convertirlo
+  const match = trimmed.match(/^(\d{1,2})[/-](\d{1,2})[/-]((?:19|20)\d{2})$/);
+  if (match) {
+    const reconstructed = `${match[3]}-${match[2].padStart(2, '0')}-${match[1].padStart(2, '0')}`;
+    if (isValidDate(reconstructed)) return reconstructed;
+  }
+  return '';
+}
+
+export function parseDateParts(dateStr: any): { year: string; month: string; day: string } {
+  if (!dateStr || typeof dateStr !== 'string') return { year: '', month: '', day: '' };
+  const trimmed = dateStr.trim();
+  if (!isValidDate(trimmed)) return { year: '', month: '', day: '' };
+  const parts = trimmed.split('-');
+  return {
+    year: parts[0] || '',
+    month: parts[1] || '',
+    day: parts[2] || ''
+  };
+}
+
+export const DATE_DAYS = Array.from({ length: 31 }, (_, i) => String(i + 1).padStart(2, '0'));
+export const DATE_MONTHS = [
+  { val: '01', label: '01 - Ene' },
+  { val: '02', label: '02 - Feb' },
+  { val: '03', label: '03 - Mar' },
+  { val: '04', label: '04 - Abr' },
+  { val: '05', label: '05 - May' },
+  { val: '06', label: '06 - Jun' },
+  { val: '07', label: '07 - Jul' },
+  { val: '08', label: '08 - Ago' },
+  { val: '09', label: '09 - Sep' },
+  { val: '10', label: '10 - Oct' },
+  { val: '11', label: '11 - Nov' },
+  { val: '12', label: '12 - Dic' }
+];
+export const DATE_YEARS = ['2025', '2026', '2027', '2028', '2029', '2030'];
+
 // Convertidor robusto para fechas de Excel / CSV
 function parseExcelDate(val: any): string {
   if (!val) return '';
   if (typeof val === 'number') {
     // Número serial de fecha de Excel
     const date = new Date(Math.round((val - 25569) * 86400 * 1000));
-    return toLocalDateString(date);
+    return sanitizeIsoDate(toLocalDateString(date));
   }
   const str = String(val).trim();
   if (/^\d{5}$/.test(str)) {
     const num = parseInt(str, 10);
     const date = new Date(Math.round((num - 25569) * 86400 * 1000));
-    return toLocalDateString(date);
+    return sanitizeIsoDate(toLocalDateString(date));
   }
   if (/^\d{1,2}[/-]\d{1,2}[/-]\d{4}$/.test(str)) {
     const parts = str.split(/[/-]/);
-    return `${parts[2]}-${parts[1].padStart(2, '0')}-${parts[0].padStart(2, '0')}`;
+    return sanitizeIsoDate(`${parts[2]}-${parts[1].padStart(2, '0')}-${parts[0].padStart(2, '0')}`);
   }
-  return str.split('T')[0];
+  return sanitizeIsoDate(str.split('T')[0]);
 }
 
 export const INVOICE_STATUS_OPTIONS = [
@@ -217,6 +268,9 @@ export default function App() {
   const [tableStatusFilter, setTableStatusFilter] = useState<string>('todos');
   const [tableDateStart, setTableDateStart] = useState<string>('');
   const [tableDateEnd, setTableDateEnd] = useState<string>('');
+  const [tableEmpresaFilter, setTableEmpresaFilter] = useState<string>('todas');
+  const [showEmpresaFilterModal, setShowEmpresaFilterModal] = useState<boolean>(false);
+  const [empresaSearchQuery, setEmpresaSearchQuery] = useState<string>('');
 
   // Modals state
   const [showCalendarModal, setShowCalendarModal] = useState(false);
@@ -437,9 +491,68 @@ export default function App() {
     return invoices;
   }, [invoices, periodFilter, customStartDate, customEndDate]);
 
-  // Direct table display filtering (Buscador + Estatus + Rango de fecha pago)
+  // Catálogo y estadísticas de empresas receptoras
+  const empresaStats = useMemo(() => {
+    const map = new Map<string, {
+      nombre: string;
+      rfc: string;
+      totalFacturas: number;
+      montoTotal: number;
+      pendiente: number;
+      cobrado: number;
+    }>();
+
+    invoices.forEach((inv) => {
+      const rawName = (inv.empresa || '').trim();
+      if (!rawName) return;
+      const key = rawName.toLowerCase();
+      const existing = map.get(key);
+      const monto = inv.monto_total || 0;
+      const isCobrado = inv.estatus === 'Finalizado' || inv.estatus === 'Pagada sin complemento';
+      const isExcluded = inv.estatus === 'Cancelada' || inv.estatus === 'Complemento' || monto <= 0;
+
+      if (!existing) {
+        const cli = clients.find(c => c.nombre.trim().toLowerCase() === key);
+        map.set(key, {
+          nombre: rawName,
+          rfc: inv.rfc_cliente || cli?.rfc || '',
+          totalFacturas: 1,
+          montoTotal: isExcluded ? 0 : monto,
+          pendiente: isExcluded || isCobrado ? 0 : monto,
+          cobrado: isCobrado ? monto : 0
+        });
+      } else {
+        existing.totalFacturas += 1;
+        if (!isExcluded) {
+          existing.montoTotal += monto;
+          if (isCobrado) {
+            existing.cobrado += monto;
+          } else {
+            existing.pendiente += monto;
+          }
+        }
+        if (!existing.rfc && inv.rfc_cliente) {
+          existing.rfc = inv.rfc_cliente;
+        }
+      }
+    });
+
+    return Array.from(map.values()).sort((a, b) => a.nombre.localeCompare(b.nombre));
+  }, [invoices, clients]);
+
+  const filteredEmpresaStats = useMemo(() => {
+    const q = empresaSearchQuery.trim().toLowerCase();
+    if (!q) return empresaStats;
+    return empresaStats.filter(e => 
+      e.nombre.toLowerCase().includes(q) || 
+      (e.rfc && e.rfc.toLowerCase().includes(q))
+    );
+  }, [empresaStats, empresaSearchQuery]);
+
+  // Direct table display filtering (Buscador + Estatus + Rango de fecha pago + Empresa)
   const displayInvoices = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
+    const targetEmpresa = tableEmpresaFilter.trim().toLowerCase();
 
     return periodFilteredInvoices.filter((inv) => {
       // 1. Text search
@@ -467,9 +580,16 @@ export default function App() {
       if (tableDateStart && inv.fecha_probable_pago && inv.fecha_probable_pago < tableDateStart) return false;
       if (tableDateEnd && inv.fecha_probable_pago && inv.fecha_probable_pago > tableDateEnd) return false;
 
+      // 4. Empresa filter
+      if (targetEmpresa !== 'todas') {
+        if ((inv.empresa || '').trim().toLowerCase() !== targetEmpresa) {
+          return false;
+        }
+      }
+
       return true;
     });
-  }, [periodFilteredInvoices, searchQuery, tableStatusFilter, tableDateStart, tableDateEnd]);
+  }, [periodFilteredInvoices, searchQuery, tableStatusFilter, tableDateStart, tableDateEnd, tableEmpresaFilter]);
 
   // Metrics calculation
   const metrics = useMemo(() => {
@@ -727,8 +847,12 @@ export default function App() {
   const updateInvoiceField = async (id: string, field: keyof InvoiceItem, value: any) => {
     try {
       const docRef = doc(db, 'invoices', id);
+      let finalValue = value;
+      if (field === 'fecha_probable_pago') {
+        finalValue = sanitizeIsoDate(value);
+      }
       const updates: any = {
-        [field]: value,
+        [field]: finalValue,
         updatedAt: new Date().toISOString()
       };
       if (field === 'estatus') {
@@ -1478,26 +1602,82 @@ export default function App() {
             {/* Controles de Filtrado Rápido Adicional sobre la tabla */}
             <div className="pt-2 border-t border-slate-800/80 flex flex-wrap items-center justify-between gap-2.5 text-xs">
               
-              {/* Filtro rápido por Estatus */}
-              <div className="flex items-center gap-2 flex-wrap">
-                <span className="text-slate-400 font-semibold flex items-center gap-1">
-                  <ListFilter className="w-3.5 h-3.5 text-emerald-400" />
-                  <span>Estatus:</span>
-                </span>
-                <select
-                  value={tableStatusFilter}
-                  onChange={(e) => setTableStatusFilter(e.target.value)}
-                  className="bg-slate-950 border border-slate-700 text-xs text-slate-200 rounded-xl px-2.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-emerald-500 cursor-pointer"
-                >
-                  <option value="todos">Todos los estatus</option>
-                  <option value="Generado">Generado</option>
-                  <option value="Procedimiento parcial">Procedimiento parcial</option>
-                  <option value="Procedimiento terminado">Procedimiento terminado</option>
-                  <option value="Cancelada">Cancelada</option>
-                  <option value="Pagada sin complemento">Pagada sin complemento</option>
-                  <option value="Finalizado">Finalizado</option>
-                  <option value="Complemento">Complemento ($0.00)</option>
-                </select>
+              <div className="flex items-center gap-3 flex-wrap">
+                {/* BOTÓN Y FILTRO DIRECTO POR EMPRESA */}
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  <button
+                    type="button"
+                    onClick={() => setShowEmpresaFilterModal(true)}
+                    className={`px-3 py-1.5 rounded-xl text-xs font-semibold border flex items-center gap-1.5 transition-all shadow-sm cursor-pointer ${
+                      tableEmpresaFilter !== 'todas'
+                        ? 'bg-cyan-950/80 border-cyan-500/60 text-cyan-300 ring-2 ring-cyan-500/20 shadow-cyan-950/50'
+                        : 'bg-slate-800 hover:bg-slate-700 border-slate-700 text-slate-200 hover:text-white'
+                    }`}
+                    title="Abrir catálogo y filtrar por empresa"
+                  >
+                    <Building2 className="w-3.5 h-3.5 text-cyan-400" />
+                    <span>Filtrar por Empresa</span>
+                    {tableEmpresaFilter !== 'todas' ? (
+                      <span className="px-1.5 py-0.2 bg-cyan-500/20 text-cyan-300 rounded-md text-[10px] font-bold border border-cyan-500/30">
+                        Activo
+                      </span>
+                    ) : (
+                      <span className="text-slate-400 text-[10px]">({empresaStats.length})</span>
+                    )}
+                  </button>
+
+                  <select
+                    value={tableEmpresaFilter}
+                    onChange={(e) => setTableEmpresaFilter(e.target.value)}
+                    className="bg-slate-950 border border-slate-700 text-xs text-slate-200 rounded-xl px-2.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-cyan-500 cursor-pointer max-w-[210px] truncate"
+                    title="Seleccionar empresa receptora"
+                  >
+                    <option value="todas">Todas las empresas ({empresaStats.length})</option>
+                    {empresaStats.map((item) => (
+                      <option key={item.nombre} value={item.nombre}>
+                        {item.nombre} ({item.totalFacturas})
+                      </option>
+                    ))}
+                  </select>
+
+                  {tableEmpresaFilter !== 'todas' && (
+                    <div className="flex items-center gap-1 px-2.5 py-1 bg-cyan-950/70 border border-cyan-700/80 text-cyan-300 rounded-xl text-xs font-medium animate-fadeIn">
+                      <span className="max-w-[130px] truncate font-semibold" title={tableEmpresaFilter}>
+                        {tableEmpresaFilter}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => setTableEmpresaFilter('todas')}
+                        className="hover:text-white text-cyan-400 hover:bg-cyan-900/60 rounded p-0.5 transition-colors cursor-pointer"
+                        title="Quitar filtro de empresa"
+                      >
+                        <X className="w-3 h-3" />
+                      </button>
+                    </div>
+                  )}
+                </div>
+
+                {/* Filtro rápido por Estatus */}
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="text-slate-400 font-semibold flex items-center gap-1">
+                    <ListFilter className="w-3.5 h-3.5 text-emerald-400" />
+                    <span>Estatus:</span>
+                  </span>
+                  <select
+                    value={tableStatusFilter}
+                    onChange={(e) => setTableStatusFilter(e.target.value)}
+                    className="bg-slate-950 border border-slate-700 text-xs text-slate-200 rounded-xl px-2.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-emerald-500 cursor-pointer"
+                  >
+                    <option value="todos">Todos los estatus</option>
+                    <option value="Generado">Generado</option>
+                    <option value="Procedimiento parcial">Procedimiento parcial</option>
+                    <option value="Procedimiento terminado">Procedimiento terminado</option>
+                    <option value="Cancelada">Cancelada</option>
+                    <option value="Pagada sin complemento">Pagada sin complemento</option>
+                    <option value="Finalizado">Finalizado</option>
+                    <option value="Complemento">Complemento ($0.00)</option>
+                  </select>
+                </div>
               </div>
 
               {/* Filtro por Rango Directo de Fecha de Pago Probable */}
@@ -1522,11 +1702,13 @@ export default function App() {
                 <button
                   onClick={() => {
                     setSearchQuery('');
+                    setTableEmpresaFilter('todas');
                     setTableStatusFilter('todos');
                     setTableDateStart('');
                     setTableDateEnd('');
                   }}
                   className="px-2.5 py-1.5 text-[11px] bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl transition-all border border-slate-700 cursor-pointer"
+                  title="Restablecer todos los filtros de la tabla"
                 >
                   Limpiar
                 </button>
@@ -1584,7 +1766,19 @@ export default function App() {
               <thead>
                 <tr className="bg-slate-950/90 border-b border-slate-800 text-slate-400 font-semibold uppercase tracking-wider text-[11px] select-none sticky top-0 z-20 backdrop-blur-md">
                   <th className="py-3 px-3 text-center min-w-[110px] w-28">1. Folio</th>
-                  <th className="py-3 px-4 min-w-[250px]">2. Empresa / Receptor</th>
+                  <th className="py-3 px-4 min-w-[250px]">
+                    <div className="flex items-center justify-between gap-1">
+                      <span>2. Empresa / Receptor</span>
+                      <button
+                        type="button"
+                        onClick={() => setShowEmpresaFilterModal(true)}
+                        title="Filtrar por empresa"
+                        className="p-1 hover:bg-slate-800 text-slate-400 hover:text-cyan-400 rounded transition-colors cursor-pointer"
+                      >
+                        <Building2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  </th>
                   <th className="py-3 px-3 min-w-[140px]">3. Orden de Compra</th>
                   <th className="py-3 px-4 min-w-[280px]">4. Concepto</th>
                   <th className="py-3 px-3 text-right min-w-[120px]">5. P. Unitario</th>
@@ -1627,8 +1821,20 @@ export default function App() {
 
                         {/* 2. Empresa */}
                         <td className="py-2.5 px-4 font-semibold text-slate-200">
-                          <div className="truncate max-w-[270px]" title={inv.empresa}>
-                            {inv.empresa}
+                          <div className="flex items-center justify-between gap-1.5 group">
+                            <span className="truncate max-w-[240px]" title={inv.empresa}>
+                              {inv.empresa || '-'}
+                            </span>
+                            {inv.empresa && (
+                              <button
+                                type="button"
+                                onClick={() => setTableEmpresaFilter(inv.empresa)}
+                                title={`Filtrar tabla por "${inv.empresa}"`}
+                                className="opacity-0 group-hover:opacity-100 hover:text-cyan-300 text-slate-500 hover:bg-slate-800 transition-all p-1 rounded cursor-pointer shrink-0"
+                              >
+                                <Filter className="w-3 h-3" />
+                              </button>
+                            )}
                           </div>
                         </td>
 
@@ -1660,14 +1866,78 @@ export default function App() {
                           {formatCurrency(inv.monto_total)}
                         </td>
 
-                        {/* 7. Fecha Probable de Pago */}
+                        {/* 7. Fecha Probable de Pago (3 Selectores: Día, Mes, Año) */}
                         <td className="py-2.5 px-3 whitespace-nowrap">
-                          <input
-                            type="date"
-                            value={inv.fecha_probable_pago || ''}
-                            onChange={(e) => updateInvoiceField(inv.id, 'fecha_probable_pago', e.target.value)}
-                            className="bg-slate-950 border border-slate-700 rounded-lg px-2 py-1 text-xs text-slate-200 focus:outline-none focus:ring-1 focus:ring-emerald-500 cursor-pointer"
-                          />
+                          {(() => {
+                            const { year: curYear, month: curMonth, day: curDay } = parseDateParts(inv.fecha_probable_pago);
+                            const hasFullDate = Boolean(curYear && curMonth && curDay);
+
+                            const handlePartChange = (part: 'year' | 'month' | 'day', val: string) => {
+                              const newY = part === 'year' ? val : curYear;
+                              const newM = part === 'month' ? val : curMonth;
+                              const newD = part === 'day' ? val : curDay;
+
+                              if (newY && newM && newD) {
+                                updateInvoiceField(inv.id, 'fecha_probable_pago', `${newY}-${newM.padStart(2, '0')}-${newD.padStart(2, '0')}`);
+                              } else if (!newY && !newM && !newD) {
+                                updateInvoiceField(inv.id, 'fecha_probable_pago', '');
+                              }
+                            };
+
+                            return (
+                              <div className="flex items-center gap-1">
+                                {/* Selector Día */}
+                                <select
+                                  value={curDay}
+                                  onChange={(e) => handlePartChange('day', e.target.value)}
+                                  className="bg-slate-950 border border-slate-700/80 rounded px-1.5 py-1 text-xs text-slate-200 focus:outline-none focus:ring-1 focus:ring-emerald-500 cursor-pointer font-mono hover:border-slate-500 transition-colors"
+                                  title="Día de pago"
+                                >
+                                  <option value="">Día</option>
+                                  {DATE_DAYS.map((d) => (
+                                    <option key={d} value={d}>{d}</option>
+                                  ))}
+                                </select>
+
+                                {/* Selector Mes */}
+                                <select
+                                  value={curMonth}
+                                  onChange={(e) => handlePartChange('month', e.target.value)}
+                                  className="bg-slate-950 border border-slate-700/80 rounded px-1.5 py-1 text-xs text-slate-200 focus:outline-none focus:ring-1 focus:ring-emerald-500 cursor-pointer font-mono hover:border-slate-500 transition-colors"
+                                  title="Mes de pago"
+                                >
+                                  <option value="">Mes</option>
+                                  {DATE_MONTHS.map((m) => (
+                                    <option key={m.val} value={m.val}>{m.label}</option>
+                                  ))}
+                                </select>
+
+                                {/* Selector Año */}
+                                <select
+                                  value={curYear}
+                                  onChange={(e) => handlePartChange('year', e.target.value)}
+                                  className="bg-slate-950 border border-slate-700/80 rounded px-1.5 py-1 text-xs text-slate-200 focus:outline-none focus:ring-1 focus:ring-emerald-500 cursor-pointer font-mono hover:border-slate-500 transition-colors"
+                                  title="Año de pago"
+                                >
+                                  <option value="">Año</option>
+                                  {DATE_YEARS.map((y) => (
+                                    <option key={y} value={y}>{y}</option>
+                                  ))}
+                                </select>
+
+                                {hasFullDate && (
+                                  <button
+                                    type="button"
+                                    onClick={() => updateInvoiceField(inv.id, 'fecha_probable_pago', '')}
+                                    className="p-1 text-slate-500 hover:text-rose-400 rounded transition-colors cursor-pointer"
+                                    title="Limpiar fecha"
+                                  >
+                                    <X className="w-3.5 h-3.5" />
+                                  </button>
+                                )}
+                              </div>
+                            );
+                          })()}
                         </td>
 
                         {/* 8. Estatus */}
@@ -2132,6 +2402,145 @@ export default function App() {
                   <span>{csvStatusText}</span>
                 </div>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ==================== MODAL: FILTRAR POR EMPRESA ==================== */}
+      {showEmpresaFilterModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/85 backdrop-blur-md p-4 overflow-y-auto">
+          <div className="bg-slate-900 border border-slate-800 rounded-3xl max-w-2xl w-full p-6 shadow-2xl space-y-4 my-8 max-h-[88vh] flex flex-col">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-800 shrink-0">
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 bg-cyan-950 border border-cyan-500/40 rounded-xl flex items-center justify-center text-cyan-400">
+                  <Building2 className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-white">Filtrar por Empresa</h3>
+                  <p className="text-xs text-slate-400">
+                    Selecciona una empresa receptora para filtrar la tabla de facturas y complementos
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => {
+                  setShowEmpresaFilterModal(false);
+                  setEmpresaSearchQuery('');
+                }}
+                className="text-slate-400 hover:text-white p-1.5 rounded-lg hover:bg-slate-800 cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Buscador de empresas */}
+            <div className="flex items-center gap-2.5 shrink-0">
+              <div className="relative flex-1">
+                <input
+                  type="text"
+                  value={empresaSearchQuery}
+                  onChange={(e) => setEmpresaSearchQuery(e.target.value)}
+                  placeholder="Buscar empresa por nombre o RFC..."
+                  className="w-full bg-slate-950 border border-slate-700 text-xs text-white rounded-xl pl-9 pr-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-cyan-500 placeholder:text-slate-500"
+                  autoFocus
+                />
+                <Search className="w-4 h-4 text-slate-400 absolute left-3 top-3" />
+              </div>
+
+              {tableEmpresaFilter !== 'todas' && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setTableEmpresaFilter('todas');
+                    setShowEmpresaFilterModal(false);
+                    setEmpresaSearchQuery('');
+                  }}
+                  className="px-3 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white rounded-xl text-xs font-semibold border border-slate-700 transition-all cursor-pointer whitespace-nowrap"
+                >
+                  Mostrar todas
+                </button>
+              )}
+            </div>
+
+            {/* Listado de empresas */}
+            <div className="overflow-y-auto flex-1 space-y-2 pr-1 min-h-[220px]">
+              {filteredEmpresaStats.length === 0 ? (
+                <div className="py-12 text-center text-slate-500 text-xs">
+                  No se encontraron empresas con el término buscado.
+                </div>
+              ) : (
+                filteredEmpresaStats.map((emp) => {
+                  const isSelected = tableEmpresaFilter.toLowerCase() === emp.nombre.toLowerCase();
+                  return (
+                    <div
+                      key={emp.nombre}
+                      onClick={() => {
+                        setTableEmpresaFilter(emp.nombre);
+                        setShowEmpresaFilterModal(false);
+                        setEmpresaSearchQuery('');
+                      }}
+                      className={`p-3.5 rounded-2xl border transition-all cursor-pointer flex flex-col sm:flex-row sm:items-center justify-between gap-3 ${
+                        isSelected
+                          ? 'bg-cyan-950/60 border-cyan-500 text-white shadow-md shadow-cyan-950/40 ring-1 ring-cyan-500/50'
+                          : 'bg-slate-950/60 border-slate-800 hover:border-slate-700 hover:bg-slate-800/40 text-slate-200'
+                      }`}
+                    >
+                      <div className="space-y-1">
+                        <div className="flex items-center gap-2">
+                          <span className="font-bold text-sm text-white">{emp.nombre}</span>
+                          {isSelected && (
+                            <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-cyan-500/20 text-cyan-300 border border-cyan-500/30">
+                              Activa
+                            </span>
+                          )}
+                        </div>
+                        {emp.rfc && (
+                          <div className="text-xs font-mono text-slate-400">RFC: {emp.rfc}</div>
+                        )}
+                      </div>
+
+                      <div className="flex items-center gap-4 text-xs">
+                        <div className="text-right">
+                          <div className="text-slate-400 text-[11px]">{emp.totalFacturas} comprobantes</div>
+                          <div className="font-bold text-emerald-400">{formatCurrency(emp.montoTotal)}</div>
+                        </div>
+
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setTableEmpresaFilter(emp.nombre);
+                            setShowEmpresaFilterModal(false);
+                            setEmpresaSearchQuery('');
+                          }}
+                          className={`px-3 py-1.5 rounded-xl font-semibold text-xs transition-all cursor-pointer ${
+                            isSelected
+                              ? 'bg-cyan-500 text-slate-950 font-bold'
+                              : 'bg-slate-800 hover:bg-cyan-600 hover:text-white text-slate-300'
+                          }`}
+                        >
+                          {isSelected ? 'Seleccionada' : 'Filtrar'}
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+
+            <div className="pt-2 border-t border-slate-800 flex items-center justify-between text-xs text-slate-400 shrink-0">
+              <span>Total de empresas: <strong>{empresaStats.length}</strong></span>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowEmpresaFilterModal(false);
+                  setEmpresaSearchQuery('');
+                }}
+                className="px-4 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl cursor-pointer"
+              >
+                Cerrar
+              </button>
             </div>
           </div>
         </div>
