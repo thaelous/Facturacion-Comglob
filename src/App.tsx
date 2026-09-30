@@ -36,7 +36,8 @@ import {
   ListFilter,
   CalendarRange,
   Building2,
-  Bell
+  Bell,
+  AlertOctagon
 } from 'lucide-react';
 import { initializeApp, getApps, getApp } from 'firebase/app';
 import { 
@@ -267,7 +268,8 @@ export const INVOICE_STATUS_OPTIONS = [
   'Cancelada',
   'Pagada sin complemento',
   'Finalizado',
-  'Complemento'
+  'Complemento',
+  'Problema'
 ] as const;
 
 export type InvoiceStatus = typeof INVOICE_STATUS_OPTIONS[number];
@@ -387,6 +389,7 @@ export default function App() {
   const [showCsvModal, setShowCsvModal] = useState(false);
   const [showChartModal, setShowChartModal] = useState(false);
   const [showUrgentModal, setShowUrgentModal] = useState(false);
+  const [showProblemaModal, setShowProblemaModal] = useState(false);
 
   // Mountain Chart state
   const [chartCenterDate, setChartCenterDate] = useState<Date>(new Date());
@@ -441,8 +444,6 @@ export default function App() {
           if (!INVOICE_STATUS_OPTIONS.includes(estatus)) {
             if (estatus === ('Completo' as any) || estatus === ('Pagada con complemento' as any)) {
               estatus = monto === 0 ? 'Complemento' : 'Finalizado';
-            } else if (estatus === ('Problema' as any)) {
-              estatus = 'Procedimiento parcial';
             } else {
               estatus = 'Generado';
             }
@@ -750,7 +751,7 @@ export default function App() {
       if (inv.estatus === 'Finalizado' || inv.estatus === 'Pagada sin complemento') {
         totalCobrado += inv.monto_total;
         countCobrado++;
-      } else if (inv.estatus === 'Procedimiento parcial') {
+      } else if (inv.estatus === 'Procedimiento parcial' || inv.estatus === 'Problema') {
         problemaMonto += inv.monto_total;
         countProblema++;
       } else {
@@ -791,6 +792,16 @@ export default function App() {
         inv.fecha_probable_pago <= todayYMD
       );
       return isPagadaSinComp || isVencidaSinComp;
+    });
+  }, [invoices]);
+
+  // Facturas con Problema
+  const problemaInvoices = useMemo(() => {
+    return invoices.filter(inv => {
+      if (inv.estatus === 'Complemento' || inv.estatus === 'Cancelada' || inv.monto_total <= 0) {
+        return false;
+      }
+      return inv.estatus === 'Problema';
     });
   }, [invoices]);
 
@@ -1056,6 +1067,8 @@ export default function App() {
         return 'bg-slate-700/80 text-slate-200 border-slate-600 hover:bg-slate-700';
       case 'Procedimiento parcial':
         return 'bg-amber-500/90 text-slate-950 font-bold border-amber-400 hover:bg-amber-400';
+      case 'Problema':
+        return 'bg-red-600/95 text-white font-extrabold border-2 border-orange-400 hover:bg-red-500 shadow-sm';
       case 'Procedimiento terminado':
         return 'bg-blue-600/90 text-white font-bold border-blue-400 hover:bg-blue-500';
       case 'Cancelada':
@@ -1893,6 +1906,34 @@ export default function App() {
                   </span>
                 </button>
 
+                {/* Botón Facturas con Problema */}
+                <button
+                  type="button"
+                  onClick={() => setShowProblemaModal(true)}
+                  className={`px-3.5 py-2.5 rounded-xl text-xs font-bold border flex items-center gap-2 transition-all shadow-sm cursor-pointer whitespace-nowrap ${
+                    problemaInvoices.length > 0
+                      ? 'bg-rose-950/40 hover:bg-rose-900/60 border-rose-500/50 text-rose-200 shadow-rose-950/50 ring-1 ring-rose-500/30'
+                      : 'bg-slate-800/90 hover:bg-slate-800 border-slate-700/80 text-slate-400'
+                  }`}
+                  title="Ver facturas reportadas con problema"
+                >
+                  <AlertOctagon
+                    className={`w-4 h-4 ${
+                      problemaInvoices.length > 0 ? 'text-rose-400 animate-pulse' : 'text-slate-400'
+                    }`}
+                  />
+                  <span>Facturas con Problema</span>
+                  <span
+                    className={`px-2 py-0.5 rounded-full text-[11px] font-black ${
+                      problemaInvoices.length > 0
+                        ? 'bg-rose-600 text-white'
+                        : 'bg-slate-700 text-slate-400'
+                    }`}
+                  >
+                    {problemaInvoices.length}
+                  </span>
+                </button>
+
                 {/* Buscador global */}
                 <div className="relative w-full md:w-80">
                   <input
@@ -1979,6 +2020,7 @@ export default function App() {
                     <option value="todos">Todos los estatus</option>
                     <option value="Generado">Generado</option>
                     <option value="Procedimiento parcial">Procedimiento parcial</option>
+                    <option value="Problema">Problema</option>
                     <option value="Procedimiento terminado">Procedimiento terminado</option>
                     <option value="Cancelada">Cancelada</option>
                     <option value="Pagada sin complemento">Pagada sin complemento</option>
@@ -2887,6 +2929,132 @@ export default function App() {
               <button
                 type="button"
                 onClick={() => setShowUrgentModal(false)}
+                className="px-4 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl cursor-pointer"
+              >
+                Cerrar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: FACTURAS CON PROBLEMA */}
+      {showProblemaModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/85 backdrop-blur-md p-4 overflow-y-auto">
+          <div className="bg-slate-900 border border-slate-800 rounded-3xl max-w-4xl w-full p-6 shadow-2xl space-y-4 my-8 max-h-[88vh] flex flex-col">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-800 shrink-0">
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 bg-rose-950 border border-rose-500/40 rounded-xl flex items-center justify-center text-rose-400">
+                  <AlertOctagon className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-white flex items-center gap-2">
+                    <span>Revisión de Facturas con Problema</span>
+                    <span className="px-2 py-0.5 bg-rose-600 text-white rounded-full text-xs font-black">
+                      {problemaInvoices.length}
+                    </span>
+                  </h3>
+                  <p className="text-xs text-slate-400">
+                    Comprobantes retenidos, aclaraciones pendientes o incidencias operativas
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowProblemaModal(false)}
+                className="text-slate-400 hover:text-white p-1.5 rounded-lg hover:bg-slate-800 cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Lista de facturas con problema */}
+            <div className="overflow-y-auto flex-1 space-y-2 pr-1 min-h-[220px]">
+              {problemaInvoices.length === 0 ? (
+                <div className="py-12 text-center text-slate-500 flex flex-col items-center justify-center gap-2">
+                  <CheckCircle2 className="w-10 h-10 text-emerald-500/60 mb-1" />
+                  <p className="text-sm font-semibold text-slate-300">¡Sin incidencias activas!</p>
+                  <p className="text-xs text-slate-500">
+                    No hay facturas registradas con el estatus "Problema".
+                  </p>
+                </div>
+              ) : (
+                problemaInvoices.map((inv) => {
+                  const notaOrConcepto = inv.concepto || inv.complemento || 'Sin notas registradas';
+                  return (
+                    <div
+                      key={inv.id}
+                      className="flex flex-col sm:flex-row sm:items-center justify-between p-3.5 rounded-2xl bg-slate-950/70 border border-slate-800 hover:border-rose-500/40 transition-all gap-3"
+                    >
+                      <div className="flex items-start gap-3 min-w-0 flex-1">
+                        <span className="font-bold text-white px-2.5 py-1 bg-slate-800 rounded-lg border border-slate-700/80 text-xs font-mono shrink-0">
+                          {inv.numero_factura || 'S/N'}
+                        </span>
+                        <div className="min-w-0 flex-1">
+                          <div className="text-xs font-bold text-slate-200 truncate" title={inv.empresa}>
+                            {inv.empresa || 'Cliente sin nombre'}
+                          </div>
+                          <div className="text-[11px] text-slate-400 flex flex-wrap items-center gap-2 mt-0.5">
+                            <span>
+                              Pago: <strong className="text-amber-300 font-mono">{inv.fecha_probable_pago || 'Sin fecha'}</strong>
+                            </span>
+                            <span>•</span>
+                            <span className="text-slate-500 font-mono">
+                              {inv.orden_de_compra ? `OC: ${inv.orden_de_compra}` : 'Sin OC'}
+                            </span>
+                          </div>
+                          <div className="mt-1 text-[11px] text-rose-300/90 bg-rose-950/40 border border-rose-900/40 rounded-lg px-2 py-1 line-clamp-2" title={notaOrConcepto}>
+                            <span className="font-semibold text-rose-400">Nota/Concepto:</span> {notaOrConcepto}
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center justify-between sm:justify-end gap-3 shrink-0 pt-2 sm:pt-0 border-t sm:border-t-0 border-slate-800/80">
+                        <div className="text-left sm:text-right">
+                          <div className="text-xs font-black font-mono text-emerald-400">
+                            {formatCurrency(inv.monto_total)}
+                          </div>
+                          <select
+                            value={inv.estatus}
+                            onChange={(e) => updateInvoiceField(inv.id, 'estatus', e.target.value)}
+                            className="mt-1 bg-slate-900 border border-rose-500/40 text-[10px] text-rose-200 font-semibold rounded-lg px-2 py-0.5 cursor-pointer focus:outline-none focus:ring-1 focus:ring-rose-500"
+                            title="Cambiar estatus si se resolvió el problema"
+                          >
+                            {INVOICE_STATUS_OPTIONS.map((st) => (
+                              <option key={st} value={st}>
+                                {st}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setShowProblemaModal(false);
+                            setSearchQuery(inv.numero_factura || '');
+                          }}
+                          className="px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer shrink-0"
+                          title="Ver y filtrar en la tabla"
+                        >
+                          <Search className="w-3.5 h-3.5 text-cyan-400" />
+                          <span className="hidden sm:inline">Ver en tabla</span>
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+
+            <div className="pt-3 border-t border-slate-800 flex items-center justify-between text-xs text-slate-400 shrink-0">
+              <span className="font-medium text-slate-300">
+                Monto total con problema:{' '}
+                {formatCurrency(problemaInvoices.reduce((acc, curr) => acc + curr.monto_total, 0))}
+              </span>
+              <button
+                type="button"
+                onClick={() => setShowProblemaModal(false)}
                 className="px-4 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl cursor-pointer"
               >
                 Cerrar
