@@ -45,6 +45,7 @@ import {
   type Firestore,
   collection, 
   doc, 
+  getDocs,
   setDoc, 
   updateDoc, 
   deleteDoc, 
@@ -296,6 +297,8 @@ export interface InvoiceItem {
   estatus: InvoiceStatus;
   complemento: string; // Columna NOTAS
   documento_relacionado?: string;
+  uuid?: string;
+  folio_fiscal?: string;
   es_hueco_pendiente?: boolean;
   estatus_modificado_manualmente?: boolean;
   alerta_complemento_descartada?: boolean;
@@ -459,6 +462,7 @@ export default function App() {
             estatus: estatus,
             complemento: String(d.complemento || ''),
             documento_relacionado: String(d.documento_relacionado || ''),
+            uuid: String(d.uuid || d.folio_fiscal || ''),
             es_hueco_pendiente: Boolean(d.es_hueco_pendiente),
             estatus_modificado_manualmente: Boolean(d.estatus_modificado_manualmente),
             alerta_complemento_descartada: Boolean(d.alerta_complemento_descartada)
@@ -1080,40 +1084,73 @@ export default function App() {
         const xmlDoc = parser.parseFromString(xmlText, 'text/xml');
 
         const comprobante = xmlDoc.getElementsByTagName('cfdi:Comprobante')[0] || 
-                             xmlDoc.getElementsByTagName('Comprobante')[0];
+                            xmlDoc.getElementsByTagName('Comprobante')[0] ||
+                            xmlDoc.documentElement;
         if (!comprobante) {
           alert('El archivo no parece ser un comprobante CFDI válido del SAT.');
           return;
         }
 
+        const allElements = Array.from(xmlDoc.getElementsByTagName('*'));
+
         const rawFolio = (comprobante.getAttribute('Folio') || comprobante.getAttribute('folio') || file.name.replace(/\D/g, '') || 'S/N').trim();
+        const rawSerie = (comprobante.getAttribute('Serie') || comprobante.getAttribute('serie') || '').trim();
         const rawFecha = comprobante.getAttribute('Fecha') || comprobante.getAttribute('fecha') || '';
         const fecha = rawFecha ? rawFecha.split('T')[0] : toLocalDateString(new Date());
         const totalStr = comprobante.getAttribute('Total') || comprobante.getAttribute('total') || '0';
         const montoTotal = parseFloat(totalStr) || 0;
-        const tipoComprobante = comprobante.getAttribute('TipoDeComprobante') || comprobante.getAttribute('tipoDeComprobante') || 'I';
+        const tipoComprobante = (comprobante.getAttribute('TipoDeComprobante') || comprobante.getAttribute('tipoDeComprobante') || 'I').toUpperCase();
+
+        // Extraer UUID fiscal del propio comprobante (TimbreFiscalDigital)
+        const timbreNode = allElements.find(el => (el.localName || el.nodeName || '').toLowerCase().includes('timbrefiscaldigital'));
+        const currentUuid = timbreNode ? (timbreNode.getAttribute('UUID') || timbreNode.getAttribute('uuid') || '').trim() : '';
 
         const receptor = xmlDoc.getElementsByTagName('cfdi:Receptor')[0] || 
-                         xmlDoc.getElementsByTagName('Receptor')[0];
+                         xmlDoc.getElementsByTagName('Receptor')[0] ||
+                         allElements.find(el => (el.localName || el.nodeName || '').toLowerCase().endsWith('receptor'));
         const nombreReceptor = receptor ? (receptor.getAttribute('Nombre') || receptor.getAttribute('nombre') || 'Cliente SAT') : 'Cliente SAT';
         const rfcReceptor = receptor ? (receptor.getAttribute('Rfc') || receptor.getAttribute('rfc') || '') : '';
 
         const conceptoElem = xmlDoc.getElementsByTagName('cfdi:Concepto')[0] || 
-                             xmlDoc.getElementsByTagName('Concepto')[0];
+                             xmlDoc.getElementsByTagName('Concepto')[0] ||
+                             allElements.find(el => (el.localName || el.nodeName || '').toLowerCase().endsWith('concepto'));
         const descripcion = conceptoElem ? (conceptoElem.getAttribute('Descripcion') || conceptoElem.getAttribute('descripcion') || 'Servicios') : 'Servicios';
         const valorUnitario = conceptoElem ? (parseFloat(conceptoElem.getAttribute('ValorUnitario') || '0') || montoTotal) : montoTotal;
 
-        // Complemento related document
-        let docRelacionado = '';
-        const doctoRel = xmlDoc.getElementsByTagName('pago20:DoctoRelacionado')[0] ||
-                         xmlDoc.getElementsByTagName('pago10:DoctoRelacionado')[0] ||
-                         xmlDoc.getElementsByTagName('cfdi:DoctoRelacionado')[0];
-        if (doctoRel) {
-          docRelacionado = doctoRel.getAttribute('Folio') || doctoRel.getAttribute('folio') || doctoRel.getAttribute('IdDocumento') || '';
-        }
+        // 1. Detección exhaustiva de Documentos Relacionados (DoctoRelacionado en pago20, pago10, cfdi, etc.)
+        const doctosRelElements = allElements.filter(el => {
+          const name = (el.localName || el.nodeName || '').toLowerCase();
+          return name.endsWith('doctorelacionado') || name === 'doctorelacionado';
+        });
 
-        const isComplement = montoTotal === 0 || tipoComprobante === 'P';
+        const relatedDocs = doctosRelElements.map(el => ({
+          folio: (el.getAttribute('Folio') || el.getAttribute('folio') || '').trim(),
+          serie: (el.getAttribute('Serie') || el.getAttribute('serie') || '').trim(),
+          uuid: (el.getAttribute('IdDocumento') || el.getAttribute('idDocumento') || '').trim()
+        })).filter(r => r.folio || r.uuid);
+
+        // También buscar en cfdi:CfdiRelacionado si existiera
+        const cfdiRelElements = allElements.filter(el => {
+          const name = (el.localName || el.nodeName || '').toLowerCase();
+          return name.endsWith('cfdirelacionado') || name === 'cfdirelacionado';
+        });
+        cfdiRelElements.forEach(cr => {
+          const relUuid = (cr.getAttribute('UUID') || cr.getAttribute('uuid') || '').trim();
+          if (relUuid && !relatedDocs.some(r => r.uuid.toLowerCase() === relUuid.toLowerCase())) {
+            relatedDocs.push({ folio: '', serie: '', uuid: relUuid });
+          }
+        });
+
+        // Determinar si es un Complemento de Pago (REP)
+        const hasPagosTag = allElements.some(el => (el.localName || el.nodeName || '').toLowerCase().includes('pagos'));
+        const isComplement = montoTotal === 0 || tipoComprobante === 'P' || relatedDocs.length > 0 || hasPagosTag;
         const estatus: InvoiceStatus = isComplement ? 'Complemento' : 'Generado';
+
+        let docRelacionadoSummary = '';
+        if (relatedDocs.length > 0) {
+          const firstRel = relatedDocs[0];
+          docRelacionadoSummary = firstRel.folio || firstRel.uuid || (firstRel.serie ? `${firstRel.serie}-${firstRel.folio}` : '');
+        }
 
         // Check if client exists in directory to calculate probable payment date
         let probableDate = '';
@@ -1137,7 +1174,7 @@ export default function App() {
 
         // PREVENCIÓN DE DUPLICADOS Y HUECOS: Buscar coincidencia exacta o numérica
         const existingInv = invoices.find(i => {
-          const normA = i.numero_factura.trim().toLowerCase();
+          const normA = (i.numero_factura || '').trim().toLowerCase();
           const normB = rawFolio.toLowerCase();
           return normA === normB || (normA.replace(/\D/g, '') === normB.replace(/\D/g, '') && normB.replace(/\D/g, '').length > 0);
         });
@@ -1155,8 +1192,9 @@ export default function App() {
           fecha_emision: fecha,
           fecha_probable_pago: existingInv?.fecha_probable_pago || probableDate,
           estatus: estatus,
-          complemento: isComplement && docRelacionado ? `Relacionado con factura ${docRelacionado}` : (existingInv?.complemento || ''),
-          documento_relacionado: docRelacionado,
+          complemento: isComplement && docRelacionadoSummary ? `Relacionado con factura ${docRelacionadoSummary}` : (existingInv?.complemento || ''),
+          documento_relacionado: docRelacionadoSummary,
+          uuid: currentUuid || existingInv?.uuid || '',
           es_hueco_pendiente: false,
           updatedAt: new Date().toISOString()
         };
@@ -1167,20 +1205,92 @@ export default function App() {
 
         await setDoc(doc(db, 'invoices', targetDocId), payload, { merge: true });
 
-        // Cruzar complemento con factura original
-        if (isComplement && docRelacionado) {
-          const orig = invoices.find(i => i.numero_factura.toLowerCase() === docRelacionado.toLowerCase());
-          if (orig && !orig.estatus_modificado_manualmente && orig.monto_total > 0) {
-            await updateDoc(doc(db, 'invoices', orig.id), {
-              estatus: 'Finalizado',
-              complemento: `Complemento ${rawFolio}`,
-              documento_relacionado: rawFolio,
-              updatedAt: new Date().toISOString()
+        // 2. BÚSQUEDA Y ACTUALIZACIÓN INMEDIATA DE LA FACTURA ORIGINAL RELACIONADA
+        let vinculadaCount = 0;
+        if (isComplement && relatedDocs.length > 0) {
+          let poolInvoices = [...invoices];
+          try {
+            const snap = await getDocs(collection(db, 'invoices'));
+            const firestoreItems: any[] = [];
+            snap.forEach(dSnap => firestoreItems.push({ id: dSnap.id, ...dSnap.data() }));
+            if (firestoreItems.length > 0) poolInvoices = firestoreItems;
+          } catch (errSnap) {
+            console.warn('Consulta directa a Firestore de respaldo:', errSnap);
+          }
+
+          for (const rel of relatedDocs) {
+            const relFolio = (rel.folio || '').trim().toLowerCase();
+            const relSerie = (rel.serie || '').trim().toLowerCase();
+            const relUuid = (rel.uuid || '').trim().toLowerCase();
+            const fullRel = (rel.serie && rel.folio) ? `${relSerie}${relFolio}` : '';
+            const hyphenRel = (rel.serie && rel.folio) ? `${relSerie}-${relFolio}` : '';
+            const relDigits = relFolio.replace(/\D/g, '');
+
+            const originalInvoice = poolInvoices.find(inv => {
+              const m = typeof inv.monto_total === 'number' ? inv.monto_total : (parseFloat(inv.monto_total) || 0);
+              if (m <= 0) return false;
+
+              const invFolio = (inv.numero_factura || '').trim().toLowerCase();
+              const invDigits = invFolio.replace(/\D/g, '');
+              const invUuid = (inv.uuid || inv.folio_fiscal || '').trim().toLowerCase();
+              const invDocRel = (inv.documento_relacionado || '').trim().toLowerCase();
+
+              // 1. Coincidencia por UUID fiscal
+              if (relUuid && invUuid && invUuid === relUuid) return true;
+              if (relUuid && invFolio === relUuid) return true;
+
+              // 2. Coincidencia por Folio exacto
+              if (relFolio && invFolio === relFolio) return true;
+              if (fullRel && invFolio === fullRel) return true;
+              if (hyphenRel && invFolio === hyphenRel) return true;
+
+              // 3. Coincidencia numérica
+              if (relDigits && invDigits && relDigits === invDigits && relDigits.length >= 1) {
+                return true;
+              }
+
+              // 4. Coincidencia con documento_relacionado
+              if (relFolio && invDocRel === relFolio) return true;
+              if (relUuid && invDocRel === relUuid) return true;
+
+              return false;
             });
+
+            if (originalInvoice) {
+              const folioCompRef = rawFolio || 'S/N';
+              const notaActualizada = `Complemento ${folioCompRef}`;
+
+              // PRIORIDAD ABSOLUTA: se actualiza sin importar estatus_modificado_manualmente
+              await updateDoc(doc(db, 'invoices', originalInvoice.id), {
+                estatus: 'Finalizado',
+                complemento: notaActualizada,
+                documento_relacionado: folioCompRef,
+                alerta_complemento_descartada: true,
+                estatus_modificado_manualmente: false,
+                updatedAt: new Date().toISOString()
+              });
+
+              originalInvoice.estatus = 'Finalizado';
+              originalInvoice.complemento = notaActualizada;
+              originalInvoice.documento_relacionado = folioCompRef;
+              originalInvoice.alerta_complemento_descartada = true;
+              vinculadaCount++;
+            }
           }
         }
 
-        alert(`¡Factura ${rawFolio} registrada exitosamente ${existingInv ? '(Hueco/registro anterior actualizado sin duplicados)' : ''}!`);
+        let msg = `¡Factura ${rawFolio} registrada exitosamente!`;
+        if (isComplement) {
+          if (vinculadaCount > 0) {
+            msg = `¡Complemento ${rawFolio} vinculado exitosamente con ${vinculadaCount} factura(s) de ingreso! Su estatus cambió a "Finalizado".`;
+          } else if (relatedDocs.length > 0) {
+            msg = `¡Complemento ${rawFolio} registrado! Nota: Se buscó la factura con folio/UUID "${docRelacionadoSummary}", pero aún no se encuentra registrada en el sistema.`;
+          }
+        } else if (existingInv) {
+          msg += ' (Hueco/registro anterior actualizado sin duplicados)';
+        }
+
+        alert(msg);
       } catch (err) {
         console.error('Error parsing XML:', err);
         alert('Hubo un error al procesar el archivo XML.');
