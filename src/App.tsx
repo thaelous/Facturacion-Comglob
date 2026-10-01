@@ -376,6 +376,7 @@ export default function App() {
 
   // Table direct advanced filters
   const [tableStatusFilter, setTableStatusFilter] = useState<string>('todos');
+  const [hideComplementos, setHideComplementos] = useState<boolean>(false);
   const [tableDateStart, setTableDateStart] = useState<string>('');
   const [tableDateEnd, setTableDateEnd] = useState<string>('');
   const [tableEmpresaFilter, setTableEmpresaFilter] = useState<string>('todas');
@@ -713,7 +714,12 @@ export default function App() {
         }
       }
 
-      // 3. Date range for payment
+      // 3. Hide complementos filter
+      if (hideComplementos) {
+        if (inv.estatus === 'Complemento' || inv.monto_total <= 0) return false;
+      }
+
+      // 4. Date range for payment
       if (tableDateStart && inv.fecha_probable_pago && inv.fecha_probable_pago < tableDateStart) return false;
       if (tableDateEnd && inv.fecha_probable_pago && inv.fecha_probable_pago > tableDateEnd) return false;
 
@@ -726,7 +732,7 @@ export default function App() {
 
       return true;
     });
-  }, [periodFilteredInvoices, searchQuery, tableStatusFilter, tableDateStart, tableDateEnd, tableEmpresaFilter]);
+  }, [periodFilteredInvoices, searchQuery, tableStatusFilter, tableDateStart, tableDateEnd, tableEmpresaFilter, hideComplementos]);
 
   // Metrics calculation
   const metrics = useMemo(() => {
@@ -2011,6 +2017,25 @@ export default function App() {
                     <option value="Finalizado">Finalizado</option>
                     <option value="Complemento">Complemento ($0.00)</option>
                   </select>
+
+                  {/* BOTÓN OCULTAR COMPLEMENTOS */}
+                  <button
+                    type="button"
+                    onClick={() => setHideComplementos(!hideComplementos)}
+                    className={`px-3 py-1.5 rounded-xl text-xs font-semibold border flex items-center gap-1.5 transition-all shadow-sm cursor-pointer ${
+                      hideComplementos
+                        ? 'bg-purple-950/80 border-purple-500/60 text-purple-300 ring-2 ring-purple-500/20'
+                        : 'bg-slate-800 hover:bg-slate-700 border-slate-700 text-slate-300 hover:text-white'
+                    }`}
+                    title="Ocultar o mostrar complementos de pago en la tabla"
+                  >
+                    {hideComplementos ? (
+                      <Eye className="w-3.5 h-3.5 text-purple-300" />
+                    ) : (
+                      <EyeOff className="w-3.5 h-3.5 text-purple-400" />
+                    )}
+                    <span>{hideComplementos ? 'Complementos ocultos (Mostrar)' : 'Ocultar complementos'}</span>
+                  </button>
                 </div>
               </div>
 
@@ -2038,6 +2063,7 @@ export default function App() {
                     setSearchQuery('');
                     setTableEmpresaFilter('todas');
                     setTableStatusFilter('todos');
+                    setHideComplementos(false);
                     setTableDateStart('');
                     setTableDateEnd('');
                   }}

@@ -505,6 +505,17 @@
                   <option value="Finalizado">Finalizado</option>
                   <option value="Complemento">Complemento ($0.00)</option>
                 </select>
+
+                <!-- BOTÓN OCULTAR COMPLEMENTOS -->
+                <button 
+                  id="toggleHideComplementosBtn"
+                  type="button"
+                  class="px-3 py-1.5 rounded-xl text-xs font-semibold border flex items-center gap-1.5 transition-all shadow-sm cursor-pointer bg-slate-800 hover:bg-slate-700 border-slate-700 text-slate-300 hover:text-white"
+                  title="Ocultar o mostrar complementos de pago en la tabla"
+                >
+                  <i data-lucide="eye-off" id="toggleHideComplementosIcon" class="w-3.5 h-3.5 text-purple-400"></i>
+                  <span id="toggleHideComplementosText">Ocultar complementos</span>
+                </button>
               </div>
             </div>
 
@@ -1124,6 +1135,7 @@
     let clients = [];
     let activePeriod = 'todo';
     let tableEmpresaFilter = 'todas';
+    let hideComplementos = false;
     let empresaSearchTerm = '';
     let calCurrentMonth = new Date().getMonth();
     let calCurrentYear = new Date().getFullYear();
@@ -1863,6 +1875,10 @@
           } else {
             if (inv.estatus !== statusFilter) return false;
           }
+        }
+
+        if (hideComplementos) {
+          if (inv.estatus === 'Complemento' || inv.monto_total <= 0) return false;
         }
 
         if (dateStart && inv.fecha_probable_pago && inv.fecha_probable_pago < dateStart) return false;
@@ -3081,6 +3097,43 @@
       });
     }
 
+    // Control de Ocultar / Mostrar Complementos
+    const toggleHideComplementosBtn = document.getElementById('toggleHideComplementosBtn');
+    const toggleHideComplementosIcon = document.getElementById('toggleHideComplementosIcon');
+    const toggleHideComplementosText = document.getElementById('toggleHideComplementosText');
+
+    function updateHideComplementosBtn() {
+      if (!toggleHideComplementosBtn) return;
+      if (hideComplementos) {
+        toggleHideComplementosBtn.className = 'px-3 py-1.5 rounded-xl text-xs font-semibold border flex items-center gap-1.5 transition-all shadow-sm cursor-pointer bg-purple-950/80 border-purple-500/60 text-purple-300 ring-2 ring-purple-500/20';
+        if (toggleHideComplementosIcon) {
+          toggleHideComplementosIcon.setAttribute('data-lucide', 'eye');
+          toggleHideComplementosIcon.className = 'w-3.5 h-3.5 text-purple-300';
+        }
+        if (toggleHideComplementosText) {
+          toggleHideComplementosText.textContent = 'Complementos ocultos (Mostrar)';
+        }
+      } else {
+        toggleHideComplementosBtn.className = 'px-3 py-1.5 rounded-xl text-xs font-semibold border flex items-center gap-1.5 transition-all shadow-sm cursor-pointer bg-slate-800 hover:bg-slate-700 border-slate-700 text-slate-300 hover:text-white';
+        if (toggleHideComplementosIcon) {
+          toggleHideComplementosIcon.setAttribute('data-lucide', 'eye-off');
+          toggleHideComplementosIcon.className = 'w-3.5 h-3.5 text-purple-400';
+        }
+        if (toggleHideComplementosText) {
+          toggleHideComplementosText.textContent = 'Ocultar complementos';
+        }
+      }
+      if (window.lucide) lucide.createIcons();
+    }
+
+    if (toggleHideComplementosBtn) {
+      toggleHideComplementosBtn.addEventListener('click', () => {
+        hideComplementos = !hideComplementos;
+        updateHideComplementosBtn();
+        renderTable();
+      });
+    }
+
     document.getElementById('clearTableFiltersBtn').addEventListener('click', () => {
       document.getElementById('searchInvoiceInput').value = '';
       const sFilterEl = document.getElementById('statusFilterSelect') || document.getElementById('filterStatusSelect');
@@ -3088,6 +3141,8 @@
       document.getElementById('tableDateStart').value = '';
       document.getElementById('tableDateEnd').value = '';
       tableEmpresaFilter = 'todas';
+      hideComplementos = false;
+      updateHideComplementosBtn();
       renderTable();
     });
 
