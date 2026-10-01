@@ -65,6 +65,21 @@
       overflow-y: hidden;
     }
 
+    /* Suavizado táctil para scroll horizontal en móviles (iOS y Android) */
+    .touch-scroll {
+      -webkit-overflow-scrolling: touch;
+      scroll-behavior: smooth;
+    }
+
+    /* Ocultar barra de desplazamiento manteniendo funcionalidad táctil */
+    .no-scrollbar::-webkit-scrollbar {
+      display: none;
+    }
+    .no-scrollbar {
+      -ms-overflow-style: none;
+      scrollbar-width: none;
+    }
+
     /* Estilos personalizados para Flatpickr flotante */
     .flatpickr-calendar {
       background: #0f172a !important;
@@ -171,87 +186,88 @@
     
     <!-- Encabezado Superior Fluido (Full-Width) -->
     <header class="bg-slate-900/90 border-b border-slate-800 sticky top-0 z-40 backdrop-blur-md w-full">
-      <div class="w-full px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between gap-4">
+      <div class="w-full px-3 sm:px-6 lg:px-8 py-3 flex flex-col md:flex-row md:items-center justify-between gap-3">
         
         <!-- Logo y Estado de Conexión -->
-        <div class="flex items-center gap-3 shrink-0">
-          <div class="w-10 h-10 bg-emerald-950 border border-emerald-500/40 rounded-xl flex items-center justify-center text-emerald-400 shadow-md shadow-emerald-950">
-            <i data-lucide="receipt" class="w-5 h-5"></i>
+        <div class="flex items-center justify-between w-full md:w-auto gap-3 shrink-0">
+          <div class="flex items-center gap-3">
+            <div class="w-10 h-10 bg-emerald-950 border border-emerald-500/40 rounded-xl flex items-center justify-center text-emerald-400 shadow-md shadow-emerald-950 shrink-0">
+              <i data-lucide="receipt" class="w-5 h-5"></i>
+            </div>
+            <div>
+              <h1 class="text-base font-bold text-white leading-tight">Control de Cobranza CFDI</h1>
+              <p class="text-xs text-emerald-400 font-medium flex items-center gap-1.5">
+                <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+                <span>Cloud Firestore Conectado</span>
+              </p>
+            </div>
           </div>
-          <div>
-            <h1 class="text-base font-bold text-white leading-tight">Control de Cobranza CFDI</h1>
-            <p class="text-[11px] text-emerald-400 font-medium flex items-center gap-1.5">
-              <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
-              Cloud Firestore Conectado en Tiempo Real
-            </p>
-          </div>
+
+          <!-- Cerrar Sesión (Visible en esquina superior en móvil) -->
+          <button 
+            type="button"
+            onclick="document.getElementById('logoutBtn').click()"
+            class="md:hidden p-2 text-slate-400 hover:text-rose-400 rounded-lg hover:bg-slate-800"
+            title="Cerrar sesión"
+          >
+            <i data-lucide="log-out" class="w-4 h-4"></i>
+          </button>
         </div>
 
-        <!-- Botones de Acción Global -->
-        <div class="flex items-center gap-2 flex-wrap justify-end">
+        <!-- Botones de Acción Global distribuidos con holgura sin traslapes -->
+        <div class="flex flex-wrap items-center gap-2 w-full md:w-auto justify-start md:justify-end">
           
-          <!-- BOTÓN: GRÁFICA TIPO MONTAÑA DE COBRANZA -->
+          <!-- BOTÓN: GRÁFICA DE COBRANZA -->
           <button 
-            id="openChartBtn"
-            class="px-3 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white rounded-xl text-xs font-semibold border border-slate-700 hover:border-emerald-500/40 transition-all flex items-center gap-1.5 shadow-sm cursor-pointer"
+            id="openChartModalBtn"
+            class="px-3 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white rounded-xl text-xs font-semibold border border-slate-700 hover:border-emerald-500/40 transition-all flex items-center gap-1.5 shadow-sm cursor-pointer whitespace-nowrap shrink-0"
             title="Abrir flujo financiero y proyección en gráfica tipo montaña"
           >
             <i data-lucide="trending-up" class="w-4 h-4 text-emerald-400"></i>
-            <span class="hidden sm:inline">Gráfica de Cobranza</span>
+            <span>Gráfica de Cobranza</span>
           </button>
 
           <!-- Calendario de Cobranza -->
           <button 
             id="openCalendarBtn"
-            class="px-3 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white rounded-xl text-xs font-semibold border border-slate-700 hover:border-emerald-500/40 transition-all flex items-center gap-1.5 shadow-sm cursor-pointer"
+            class="px-3 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white rounded-xl text-xs font-semibold border border-slate-700 hover:border-emerald-500/40 transition-all flex items-center gap-1.5 shadow-sm cursor-pointer whitespace-nowrap shrink-0"
           >
             <i data-lucide="calendar" class="w-4 h-4 text-emerald-400"></i>
-            <span class="hidden sm:inline">Calendario de Cobranza</span>
+            <span>Calendario de Cobranza</span>
           </button>
 
           <!-- Directorio de Clientes -->
           <button 
             id="openClientsBtn"
-            class="px-3 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white rounded-xl text-xs font-semibold border border-slate-700 hover:border-blue-500/40 transition-all flex items-center gap-1.5 shadow-sm cursor-pointer"
+            class="px-3 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white rounded-xl text-xs font-semibold border border-slate-700 hover:border-blue-500/40 transition-all flex items-center gap-1.5 shadow-sm cursor-pointer whitespace-nowrap shrink-0"
           >
             <i data-lucide="users" class="w-4 h-4 text-blue-400"></i>
-            <span class="hidden sm:inline">Directorio de Clientes</span>
+            <span>Directorio de Clientes</span>
           </button>
 
           <!-- Importar CSV Anual -->
           <button 
             id="openCsvImportBtn"
-            class="px-3 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white rounded-xl text-xs font-semibold border border-slate-700 hover:border-amber-500/40 transition-all flex items-center gap-1.5 shadow-sm cursor-pointer"
+            class="px-3 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white rounded-xl text-xs font-semibold border border-slate-700 hover:border-amber-500/40 transition-all flex items-center gap-1.5 shadow-sm cursor-pointer whitespace-nowrap shrink-0"
           >
             <i data-lucide="file-spreadsheet" class="w-4 h-4 text-amber-400"></i>
-            <span class="hidden sm:inline">Importar CSV Anual</span>
+            <span>Importar CSV Anual</span>
           </button>
 
           <!-- Exportar Excel -->
           <button 
             id="exportExcelBtn"
-            class="px-3 py-2 bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-300 border border-emerald-500/40 rounded-xl text-xs font-semibold transition-all flex items-center gap-1.5 shadow-sm cursor-pointer"
+            class="px-3 py-2 bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-300 border border-emerald-500/40 rounded-xl text-xs font-semibold transition-all flex items-center gap-1.5 shadow-sm cursor-pointer whitespace-nowrap shrink-0"
           >
             <i data-lucide="download" class="w-4 h-4 text-emerald-400"></i>
-            <span class="hidden sm:inline">Excel</span>
+            <span>Excel</span>
           </button>
 
-          <!-- Descargar archivo standalone index.html -->
-          <button 
-            id="downloadStandalonePageBtn"
-            class="px-3 py-2 bg-purple-600/25 hover:bg-purple-600/40 text-purple-200 border border-purple-500/40 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 shadow-sm cursor-pointer"
-            title="Descargar este archivo index.html standalone listo para desplegar en Netlify"
-          >
-            <i data-lucide="arrow-down-to-line" class="w-4 h-4 text-purple-400"></i>
-            <span class="hidden md:inline">Descargar index.html (Netlify)</span>
-            <span class="md:hidden">Netlify</span>
-          </button>
-
-          <!-- Cerrar Sesión -->
+          <!-- Cerrar Sesión (Desktop) -->
           <button 
             id="logoutBtn"
             title="Cerrar sesión"
-            class="p-2 text-slate-400 hover:text-rose-400 hover:bg-rose-950/30 rounded-xl border border-transparent hover:border-rose-900 transition-all cursor-pointer"
+            class="hidden md:inline-flex p-2 text-slate-400 hover:text-rose-400 hover:bg-rose-950/30 rounded-xl border border-transparent hover:border-rose-900 transition-all cursor-pointer shrink-0"
           >
             <i data-lucide="log-out" class="w-4 h-4"></i>
           </button>
@@ -297,54 +313,54 @@
           </div>
         </div>
 
-        <!-- 4 Tarjetas de Métricas -->
-        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5">
+        <!-- 4 Tarjetas de Métricas (2x2 en móviles, 4 columnas en desktop) -->
+        <div class="grid grid-cols-2 lg:grid-cols-4 gap-2.5 sm:gap-3.5">
           <!-- Tarjeta 1: Total Facturado -->
-          <div class="bg-slate-900/90 border border-slate-800 rounded-2xl p-4 shadow-md relative overflow-hidden">
+          <div class="bg-slate-900/90 border border-slate-800 rounded-2xl p-3 sm:p-4 shadow-md relative overflow-hidden">
             <div class="flex items-center justify-between text-slate-400 text-xs font-semibold mb-1">
-              <span>Monto Total Facturado</span>
-              <div class="w-7 h-7 bg-blue-950/60 rounded-lg flex items-center justify-center text-blue-400">
-                <i data-lucide="dollar-sign" class="w-4 h-4"></i>
+              <span class="truncate text-[11px] sm:text-xs">Monto Total Facturado</span>
+              <div class="w-6 h-6 sm:w-7 sm:h-7 bg-blue-950/60 rounded-lg flex items-center justify-center text-blue-400 shrink-0">
+                <i data-lucide="dollar-sign" class="w-3.5 h-3.5 sm:w-4 sm:h-4"></i>
               </div>
             </div>
-            <div id="metricTotalFacturado" class="text-2xl font-black text-white tracking-tight">$0.00</div>
-            <div id="metricCountFacturas" class="text-[11px] text-slate-400 mt-1">0 comprobantes activos</div>
+            <div id="metricTotalFacturado" class="text-base sm:text-xl lg:text-2xl font-black text-white tracking-tight truncate">$0.00</div>
+            <div id="metricCountFacturas" class="text-[10px] sm:text-[11px] text-slate-400 mt-1 truncate">0 comprobantes activos</div>
           </div>
 
           <!-- Tarjeta 2: Pendiente de Cobro -->
-          <div class="bg-slate-900/90 border border-slate-800 rounded-2xl p-4 shadow-md relative overflow-hidden">
+          <div class="bg-slate-900/90 border border-slate-800 rounded-2xl p-3 sm:p-4 shadow-md relative overflow-hidden">
             <div class="flex items-center justify-between text-slate-400 text-xs font-semibold mb-1">
-              <span>Pendiente de Cobro</span>
-              <div class="w-7 h-7 bg-amber-950/60 rounded-lg flex items-center justify-center text-amber-400">
-                <i data-lucide="clock" class="w-4 h-4"></i>
+              <span class="truncate text-[11px] sm:text-xs">Pendiente de Cobro</span>
+              <div class="w-6 h-6 sm:w-7 sm:h-7 bg-amber-950/60 rounded-lg flex items-center justify-center text-amber-400 shrink-0">
+                <i data-lucide="clock" class="w-3.5 h-3.5 sm:w-4 sm:h-4"></i>
               </div>
             </div>
-            <div id="metricPendienteCobro" class="text-2xl font-black text-amber-400 tracking-tight">$0.00</div>
-            <div id="metricCountPendiente" class="text-[11px] text-amber-300/80 mt-1">Por liquidar</div>
+            <div id="metricPendienteCobro" class="text-base sm:text-xl lg:text-2xl font-black text-amber-400 tracking-tight truncate">$0.00</div>
+            <div id="metricCountPendiente" class="text-[10px] sm:text-[11px] text-amber-300/80 mt-1 truncate">Por liquidar</div>
           </div>
 
           <!-- Tarjeta 3: Total Cobrado -->
-          <div class="bg-slate-900/90 border border-slate-800 rounded-2xl p-4 shadow-md relative overflow-hidden">
+          <div class="bg-slate-900/90 border border-slate-800 rounded-2xl p-3 sm:p-4 shadow-md relative overflow-hidden">
             <div class="flex items-center justify-between text-slate-400 text-xs font-semibold mb-1">
-              <span>Total Cobrado</span>
-              <div class="w-7 h-7 bg-emerald-950/60 rounded-lg flex items-center justify-center text-emerald-400">
-                <i data-lucide="check-circle-2" class="w-4 h-4"></i>
+              <span class="truncate text-[11px] sm:text-xs">Total Cobrado</span>
+              <div class="w-6 h-6 sm:w-7 sm:h-7 bg-emerald-950/60 rounded-lg flex items-center justify-center text-emerald-400 shrink-0">
+                <i data-lucide="check-circle-2" class="w-3.5 h-3.5 sm:w-4 sm:h-4"></i>
               </div>
             </div>
-            <div id="metricTotalCobrado" class="text-2xl font-black text-emerald-400 tracking-tight">$0.00</div>
-            <div id="metricCountCobrado" class="text-[11px] text-emerald-300/80 mt-1">Cobranza concluida</div>
+            <div id="metricTotalCobrado" class="text-base sm:text-xl lg:text-2xl font-black text-emerald-400 tracking-tight truncate">$0.00</div>
+            <div id="metricCountCobrado" class="text-[10px] sm:text-[11px] text-emerald-300/80 mt-1 truncate">Cobranza concluida</div>
           </div>
 
-          <!-- Tarjeta 4: En Procedimiento Parcial -->
-          <div class="bg-slate-900/90 border border-slate-800 rounded-2xl p-4 shadow-md relative overflow-hidden">
+          <!-- Tarjeta 4: En Procedimiento Parcial / Problema -->
+          <div class="bg-slate-900/90 border border-slate-800 rounded-2xl p-3 sm:p-4 shadow-md relative overflow-hidden">
             <div class="flex items-center justify-between text-slate-400 text-xs font-semibold mb-1">
-              <span>Procedimiento Parcial</span>
-              <div class="w-7 h-7 bg-rose-950/60 rounded-lg flex items-center justify-center text-rose-400">
-                <i data-lucide="alert-circle" class="w-4 h-4"></i>
+              <span class="truncate text-[11px] sm:text-xs">Procedimiento Parcial</span>
+              <div class="w-6 h-6 sm:w-7 sm:h-7 bg-rose-950/60 rounded-lg flex items-center justify-center text-rose-400 shrink-0">
+                <i data-lucide="alert-circle" class="w-3.5 h-3.5 sm:w-4 sm:h-4"></i>
               </div>
             </div>
-            <div id="metricProblemaMonto" class="text-2xl font-black text-rose-400 tracking-tight">$0.00</div>
-            <div id="metricProblemaCount" class="text-[11px] text-rose-300/80 mt-1">0 facturas en revisión</div>
+            <div id="metricProblemaMonto" class="text-base sm:text-xl lg:text-2xl font-black text-rose-400 tracking-tight truncate">$0.00</div>
+            <div id="metricProblemaCount" class="text-[10px] sm:text-[11px] text-rose-300/80 mt-1 truncate">0 facturas en revisión</div>
           </div>
         </div>
       </div>
@@ -393,12 +409,12 @@
             </div>
 
             <!-- Grupo Buscador, Botón Atención Urgente y Botón Facturas con Problema -->
-            <div class="flex items-center gap-2.5 w-full md:w-auto">
+            <div class="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5 w-full md:w-auto">
               <!-- Botón Atención Urgente con badge dinámico -->
               <button 
                 id="openUrgentModalBtn"
                 type="button"
-                class="px-3.5 py-2.5 rounded-xl text-xs font-bold border flex items-center gap-2 transition-all shadow-sm cursor-pointer whitespace-nowrap bg-slate-800/90 hover:bg-slate-800 border-slate-700/80 text-slate-400"
+                class="w-full sm:w-auto justify-center px-3.5 py-2.5 rounded-xl text-xs font-bold border flex items-center gap-2 transition-all shadow-sm cursor-pointer whitespace-nowrap bg-slate-800/90 hover:bg-slate-800 border-slate-700/80 text-slate-400"
                 title="Ver facturas que requieren complemento de pago"
               >
                 <i data-lucide="bell" id="urgentBtnIcon" class="w-4 h-4 text-slate-400"></i>
@@ -410,7 +426,7 @@
               <button 
                 id="openProblemaModalBtn"
                 type="button"
-                class="px-3.5 py-2.5 rounded-xl text-xs font-bold border flex items-center gap-2 transition-all shadow-sm cursor-pointer whitespace-nowrap bg-slate-800/90 hover:bg-slate-800 border-slate-700/80 text-slate-400"
+                class="w-full sm:w-auto justify-center px-3.5 py-2.5 rounded-xl text-xs font-bold border flex items-center gap-2 transition-all shadow-sm cursor-pointer whitespace-nowrap bg-slate-800/90 hover:bg-slate-800 border-slate-700/80 text-slate-400"
                 title="Ver facturas reportadas con problema"
               >
                 <i data-lucide="alert-octagon" id="problemaBtnIcon" class="w-4 h-4 text-slate-400"></i>
@@ -562,8 +578,8 @@
           </div>
         </div>
 
-        <!-- Contenedor scroll de la tabla -->
-        <div id="tableScrollContainer" class="w-full overflow-x-auto overflow-y-auto max-h-[70vh] shadow-md rounded-xl p-2 min-h-[380px] focus:outline-none">
+        <!-- Contenedor scroll de la tabla (con aceleración táctil para móviles) -->
+        <div id="tableScrollContainer" class="w-full overflow-x-auto overflow-y-auto max-h-[70vh] shadow-md rounded-xl p-2 min-h-[380px] focus:outline-none touch-scroll" style="-webkit-overflow-scrolling: touch;">
           <table class="w-full min-w-[1700px] text-left text-xs border-collapse">
             <thead>
               <tr class="bg-slate-950/90 border-b border-slate-800 text-slate-400 font-semibold uppercase tracking-wider text-[11px] select-none sticky top-0 z-20 backdrop-blur-md">
@@ -613,8 +629,8 @@
   </div>
 
   <!-- ==================== NUEVO MODAL: GRÁFICA TIPO MONTAÑA (FLUJO DE COBRANZA) ==================== -->
-  <div id="chartModal" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-slate-950/85 backdrop-blur-md p-3 sm:p-5 overflow-y-auto">
-    <div class="bg-slate-900 border border-slate-800 rounded-3xl w-full max-w-6xl p-5 sm:p-7 shadow-2xl space-y-5 my-auto">
+  <div id="chartModal" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-slate-950/85 backdrop-blur-md p-2 sm:p-5 overflow-y-auto">
+    <div class="bg-slate-900 border border-slate-800 rounded-3xl w-full max-w-6xl p-4 sm:p-7 shadow-2xl space-y-4 sm:space-y-5 my-auto max-h-[94vh] sm:max-h-[90vh] overflow-y-auto touch-scroll">
       
       <!-- Encabezado del Modal de Gráfica -->
       <div class="flex items-center justify-between pb-3 border-b border-slate-800">
@@ -697,11 +713,11 @@
   </div>
 
   <!-- ==================== MODAL: CALENDARIO DE COBRANZA ==================== -->
-  <div id="calendarModal" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-slate-950/85 backdrop-blur-md p-4 overflow-y-auto">
-    <div class="bg-slate-900 border border-slate-800 rounded-3xl max-w-4xl w-full p-6 shadow-2xl space-y-4 my-8">
-      <div class="flex items-center justify-between pb-3 border-b border-slate-800">
+  <div id="calendarModal" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-slate-950/85 backdrop-blur-md p-2 sm:p-4 overflow-y-auto">
+    <div class="bg-slate-900 border border-slate-800 rounded-3xl max-w-4xl w-full p-4 sm:p-6 shadow-2xl space-y-4 my-auto sm:my-8 max-h-[92vh] sm:max-h-[88vh] overflow-y-auto touch-scroll">
+      <div class="flex items-center justify-between pb-3 border-b border-slate-800 shrink-0">
         <div class="flex items-center gap-2.5">
-          <div class="w-9 h-9 bg-emerald-950 border border-emerald-500/40 rounded-xl flex items-center justify-center text-emerald-400">
+          <div class="w-9 h-9 bg-emerald-950 border border-emerald-500/40 rounded-xl flex items-center justify-center text-emerald-400 shrink-0">
             <i data-lucide="calendar" class="w-5 h-5"></i>
           </div>
           <div>
@@ -715,37 +731,39 @@
       </div>
 
       <!-- Navegación de mes -->
-      <div class="flex items-center justify-between">
-        <div id="calendarMonthTitle" class="text-base font-bold text-white capitalize">Mes Año</div>
+      <div class="flex items-center justify-between gap-2">
+        <div id="calendarMonthTitle" class="text-sm sm:text-base font-bold text-white capitalize">Mes Año</div>
         <div class="flex items-center gap-1.5">
-          <button id="calPrevMonthBtn" class="p-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl cursor-pointer">
+          <button id="calPrevMonthBtn" class="p-1.5 sm:p-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl cursor-pointer">
             <i data-lucide="chevron-left" class="w-4 h-4"></i>
           </button>
-          <button id="calTodayBtn" class="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-semibold cursor-pointer">
+          <button id="calTodayBtn" class="px-2.5 sm:px-3 py-1 sm:py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-semibold cursor-pointer">
             Hoy
           </button>
-          <button id="calNextMonthBtn" class="p-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl cursor-pointer">
+          <button id="calNextMonthBtn" class="p-1.5 sm:p-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl cursor-pointer">
             <i data-lucide="chevron-right" class="w-4 h-4"></i>
           </button>
         </div>
       </div>
 
-      <!-- Cuadrícula del Calendario -->
-      <div class="border border-slate-800 rounded-2xl overflow-hidden">
-        <div class="grid grid-cols-7 bg-slate-950 text-slate-400 text-center py-2 text-xs font-semibold border-b border-slate-800">
-          <span>Dom</span><span>Lun</span><span>Mar</span><span>Mié</span><span>Jue</span><span>Vie</span><span>Sáb</span>
+      <!-- Cuadrícula del Calendario (con scroll horizontal en móviles para mantener legibilidad) -->
+      <div class="border border-slate-800 rounded-2xl overflow-x-auto touch-scroll">
+        <div class="min-w-[520px]">
+          <div class="grid grid-cols-7 bg-slate-950 text-slate-400 text-center py-2 text-xs font-semibold border-b border-slate-800">
+            <span>Dom</span><span>Lun</span><span>Mar</span><span>Mié</span><span>Jue</span><span>Vie</span><span>Sáb</span>
+          </div>
+          <div id="calendarGrid" class="grid grid-cols-7 gap-px bg-slate-800"></div>
         </div>
-        <div id="calendarGrid" class="grid grid-cols-7 gap-px bg-slate-800"></div>
       </div>
     </div>
   </div>
 
   <!-- ==================== MODAL: DIRECTORIO DE CLIENTES ==================== -->
-  <div id="clientsModal" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-slate-950/85 backdrop-blur-md p-4 overflow-y-auto">
-    <div class="bg-slate-900 border border-slate-800 rounded-3xl max-w-4xl w-full p-6 shadow-2xl space-y-4 my-8">
-      <div class="flex items-center justify-between pb-3 border-b border-slate-800">
+  <div id="clientsModal" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-slate-950/85 backdrop-blur-md p-2 sm:p-4 overflow-y-auto">
+    <div class="bg-slate-900 border border-slate-800 rounded-3xl max-w-4xl w-full p-4 sm:p-6 shadow-2xl space-y-4 my-auto sm:my-8 max-h-[92vh] sm:max-h-[88vh] flex flex-col">
+      <div class="flex items-center justify-between pb-3 border-b border-slate-800 shrink-0">
         <div class="flex items-center gap-2.5">
-          <div class="w-9 h-9 bg-blue-950 border border-blue-500/40 rounded-xl flex items-center justify-center text-blue-400">
+          <div class="w-9 h-9 bg-blue-950 border border-blue-500/40 rounded-xl flex items-center justify-center text-blue-400 shrink-0">
             <i data-lucide="users" class="w-5 h-5"></i>
           </div>
           <div>
@@ -758,9 +776,9 @@
         </button>
       </div>
 
-      <!-- Tabla de clientes -->
-      <div class="border border-slate-800 rounded-2xl overflow-hidden max-h-96 overflow-y-auto">
-        <table class="w-full text-left text-xs">
+      <!-- Tabla de clientes con scroll horizontal y táctil -->
+      <div class="border border-slate-800 rounded-2xl overflow-x-auto overflow-y-auto max-h-96 touch-scroll flex-1">
+        <table class="w-full text-left text-xs min-w-[550px]">
           <thead class="bg-slate-950 text-slate-400 font-semibold sticky top-0 border-b border-slate-800">
             <tr>
               <th class="py-2.5 px-3">Cliente / Razón Social</th>
@@ -777,11 +795,11 @@
   </div>
 
   <!-- ==================== MODAL: IMPORTADOR CSV ANUAL ==================== -->
-  <div id="csvModal" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-slate-950/85 backdrop-blur-md p-4 overflow-y-auto">
-    <div class="bg-slate-900 border border-slate-800 rounded-3xl max-w-xl w-full p-6 shadow-2xl space-y-4 my-8">
-      <div class="flex items-center justify-between pb-3 border-b border-slate-800">
+  <div id="csvModal" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-slate-950/85 backdrop-blur-md p-2 sm:p-4 overflow-y-auto">
+    <div class="bg-slate-900 border border-slate-800 rounded-3xl max-w-xl w-full p-4 sm:p-6 shadow-2xl space-y-4 my-auto sm:my-8 max-h-[92vh] sm:max-h-[88vh] overflow-y-auto touch-scroll">
+      <div class="flex items-center justify-between pb-3 border-b border-slate-800 shrink-0">
         <div class="flex items-center gap-2.5">
-          <div class="w-9 h-9 bg-amber-950 border border-amber-500/40 rounded-xl flex items-center justify-center text-amber-400">
+          <div class="w-9 h-9 bg-amber-950 border border-amber-500/40 rounded-xl flex items-center justify-center text-amber-400 shrink-0">
             <i data-lucide="file-spreadsheet" class="w-5 h-5"></i>
           </div>
           <div>
@@ -795,7 +813,7 @@
       </div>
 
       <div class="space-y-4">
-        <div class="p-4 bg-slate-950 border border-slate-800 rounded-2xl space-y-2 text-xs text-slate-300">
+        <div class="p-3 sm:p-4 bg-slate-950 border border-slate-800 rounded-2xl space-y-2 text-xs text-slate-300">
           <div class="font-bold text-emerald-400 flex items-center gap-1.5">
             <i data-lucide="check" class="w-4 h-4"></i>
             Reglas de Transformación Automática:
@@ -811,7 +829,7 @@
         <input type="file" id="csvFileInput" accept=".csv,.xlsx,.xls" class="hidden" />
         <div 
           id="csvDropArea" 
-          class="border-2 border-dashed border-slate-700 hover:border-amber-400 rounded-2xl p-8 text-center cursor-pointer bg-slate-950/50 hover:bg-slate-950 transition-all flex flex-col items-center justify-center gap-3"
+          class="border-2 border-dashed border-slate-700 hover:border-amber-400 rounded-2xl p-6 sm:p-8 text-center cursor-pointer bg-slate-950/50 hover:bg-slate-950 transition-all flex flex-col items-center justify-center gap-3"
         >
           <div class="w-12 h-12 bg-amber-950/60 rounded-xl flex items-center justify-center text-amber-400">
             <i data-lucide="upload-cloud" class="w-6 h-6"></i>
@@ -829,11 +847,11 @@
   </div>
 
   <!-- ==================== MODAL: FILTRAR POR EMPRESA ==================== -->
-  <div id="empresaFilterModal" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-slate-950/85 backdrop-blur-md p-4 overflow-y-auto">
-    <div class="bg-slate-900 border border-slate-800 rounded-3xl max-w-2xl w-full p-6 shadow-2xl space-y-4 my-8 max-h-[88vh] flex flex-col">
+  <div id="empresaFilterModal" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-slate-950/85 backdrop-blur-md p-2 sm:p-4 overflow-y-auto">
+    <div class="bg-slate-900 border border-slate-800 rounded-3xl max-w-2xl w-full p-4 sm:p-6 shadow-2xl space-y-4 my-auto sm:my-8 max-h-[92vh] sm:max-h-[88vh] flex flex-col">
       <div class="flex items-center justify-between pb-3 border-b border-slate-800 shrink-0">
         <div class="flex items-center gap-2.5">
-          <div class="w-9 h-9 bg-cyan-950 border border-cyan-500/40 rounded-xl flex items-center justify-center text-cyan-400">
+          <div class="w-9 h-9 bg-cyan-950 border border-cyan-500/40 rounded-xl flex items-center justify-center text-cyan-400 shrink-0">
             <i data-lucide="building-2" class="w-5 h-5"></i>
           </div>
           <div>
@@ -866,8 +884,8 @@
         </button>
       </div>
 
-      <!-- Lista de empresas -->
-      <div id="empresaModalList" class="overflow-y-auto flex-1 space-y-2 pr-1 min-h-[220px]">
+      <!-- Lista de empresas con scroll táctil -->
+      <div id="empresaModalList" class="overflow-y-auto flex-1 space-y-2 pr-1 min-h-[180px] sm:min-h-[220px] touch-scroll">
         <!-- Generado dinámicamente -->
       </div>
 
@@ -885,11 +903,11 @@
   </div>
 
   <!-- ==================== MODAL: ATENCIÓN URGENTE (COMPLEMENTOS PENDIENTES) ==================== -->
-  <div id="urgentAttentionModal" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-slate-950/85 backdrop-blur-md p-4 overflow-y-auto">
-    <div class="bg-slate-900 border border-slate-800 rounded-3xl max-w-3xl w-full p-6 shadow-2xl space-y-4 my-8 max-h-[88vh] flex flex-col">
+  <div id="urgentAttentionModal" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-slate-950/85 backdrop-blur-md p-2 sm:p-4 overflow-y-auto">
+    <div class="bg-slate-900 border border-slate-800 rounded-3xl max-w-3xl w-full p-4 sm:p-6 shadow-2xl space-y-4 my-auto sm:my-8 max-h-[92vh] sm:max-h-[88vh] flex flex-col">
       <div class="flex items-center justify-between pb-3 border-b border-slate-800 shrink-0">
         <div class="flex items-center gap-2.5">
-          <div class="w-9 h-9 bg-amber-950 border border-amber-500/40 rounded-xl flex items-center justify-center text-amber-400">
+          <div class="w-9 h-9 bg-amber-950 border border-amber-500/40 rounded-xl flex items-center justify-center text-amber-400 shrink-0">
             <i data-lucide="alert-triangle" class="w-5 h-5"></i>
           </div>
           <div>
@@ -905,8 +923,8 @@
         </button>
       </div>
 
-      <!-- Lista de facturas urgentes -->
-      <div id="urgentInvoicesList" class="overflow-y-auto flex-1 space-y-2 pr-1 min-h-[220px]">
+      <!-- Lista de facturas urgentes con scroll táctil -->
+      <div id="urgentInvoicesList" class="overflow-y-auto flex-1 space-y-2 pr-1 min-h-[180px] sm:min-h-[220px] touch-scroll">
         <!-- Generado dinámicamente -->
       </div>
 
@@ -924,11 +942,11 @@
   </div>
 
   <!-- ==================== MODAL: FACTURAS CON PROBLEMA ==================== -->
-  <div id="problemaModal" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-slate-950/85 backdrop-blur-md p-4 overflow-y-auto">
-    <div class="bg-slate-900 border border-slate-800 rounded-3xl max-w-4xl w-full p-6 shadow-2xl space-y-4 my-8 max-h-[88vh] flex flex-col">
+  <div id="problemaModal" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-slate-950/85 backdrop-blur-md p-2 sm:p-4 overflow-y-auto">
+    <div class="bg-slate-900 border border-slate-800 rounded-3xl max-w-4xl w-full p-4 sm:p-6 shadow-2xl space-y-4 my-auto sm:my-8 max-h-[92vh] sm:max-h-[88vh] flex flex-col">
       <div class="flex items-center justify-between pb-3 border-b border-slate-800 shrink-0">
         <div class="flex items-center gap-2.5">
-          <div class="w-9 h-9 bg-rose-950 border border-rose-500/40 rounded-xl flex items-center justify-center text-rose-400">
+          <div class="w-9 h-9 bg-rose-950 border border-rose-500/40 rounded-xl flex items-center justify-center text-rose-400 shrink-0">
             <i data-lucide="alert-octagon" class="w-5 h-5"></i>
           </div>
           <div>
@@ -944,8 +962,8 @@
         </button>
       </div>
 
-      <!-- Lista de facturas con problema -->
-      <div id="problemaInvoicesList" class="overflow-y-auto flex-1 space-y-2 pr-1 min-h-[220px]">
+      <!-- Lista de facturas con problema con scroll táctil -->
+      <div id="problemaInvoicesList" class="overflow-y-auto flex-1 space-y-2 pr-1 min-h-[180px] sm:min-h-[220px] touch-scroll">
         <!-- Generado dinámicamente -->
       </div>
 
@@ -1304,11 +1322,11 @@
       if (btn && badge && icon) {
         badge.textContent = count;
         if (count > 0) {
-          btn.className = 'px-3.5 py-2.5 rounded-xl text-xs font-bold border flex items-center gap-2 transition-all shadow-md cursor-pointer whitespace-nowrap bg-amber-950/40 hover:bg-amber-900/60 border-amber-500/50 text-amber-200 shadow-amber-950/50 ring-1 ring-amber-500/30';
+          btn.className = 'w-full sm:w-auto justify-center px-3.5 py-2.5 rounded-xl text-xs font-bold border flex items-center gap-2 transition-all shadow-md cursor-pointer whitespace-nowrap bg-amber-950/40 hover:bg-amber-900/60 border-amber-500/50 text-amber-200 shadow-amber-950/50 ring-1 ring-amber-500/30';
           badge.className = 'px-2 py-0.5 rounded-full text-[11px] font-black bg-amber-500 text-slate-950';
           icon.className = 'w-4 h-4 text-amber-400 animate-pulse';
         } else {
-          btn.className = 'px-3.5 py-2.5 rounded-xl text-xs font-bold border flex items-center gap-2 transition-all shadow-sm cursor-pointer whitespace-nowrap bg-slate-800/90 hover:bg-slate-800 border-slate-700/80 text-slate-400';
+          btn.className = 'w-full sm:w-auto justify-center px-3.5 py-2.5 rounded-xl text-xs font-bold border flex items-center gap-2 transition-all shadow-sm cursor-pointer whitespace-nowrap bg-slate-800/90 hover:bg-slate-800 border-slate-700/80 text-slate-400';
           badge.className = 'px-2 py-0.5 rounded-full text-[11px] font-black bg-slate-700 text-slate-400';
           icon.className = 'w-4 h-4 text-slate-400';
         }
@@ -1416,11 +1434,11 @@
       if (btn && badge && icon) {
         badge.textContent = count;
         if (count > 0) {
-          btn.className = 'px-3.5 py-2.5 rounded-xl text-xs font-bold border flex items-center gap-2 transition-all shadow-md cursor-pointer whitespace-nowrap bg-rose-950/40 hover:bg-rose-900/60 border-rose-500/50 text-rose-200 shadow-rose-950/50 ring-1 ring-rose-500/30';
+          btn.className = 'w-full sm:w-auto justify-center px-3.5 py-2.5 rounded-xl text-xs font-bold border flex items-center gap-2 transition-all shadow-md cursor-pointer whitespace-nowrap bg-rose-950/40 hover:bg-rose-900/60 border-rose-500/50 text-rose-200 shadow-rose-950/50 ring-1 ring-rose-500/30';
           badge.className = 'px-2 py-0.5 rounded-full text-[11px] font-black bg-rose-600 text-white shadow-sm';
           icon.className = 'w-4 h-4 text-rose-400 animate-pulse';
         } else {
-          btn.className = 'px-3.5 py-2.5 rounded-xl text-xs font-bold border flex items-center gap-2 transition-all shadow-sm cursor-pointer whitespace-nowrap bg-slate-800/90 hover:bg-slate-800 border-slate-700/80 text-slate-400';
+          btn.className = 'w-full sm:w-auto justify-center px-3.5 py-2.5 rounded-xl text-xs font-bold border flex items-center gap-2 transition-all shadow-sm cursor-pointer whitespace-nowrap bg-slate-800/90 hover:bg-slate-800 border-slate-700/80 text-slate-400';
           badge.className = 'px-2 py-0.5 rounded-full text-[11px] font-black bg-slate-700 text-slate-400';
           icon.className = 'w-4 h-4 text-slate-400';
         }
@@ -2368,7 +2386,7 @@
     });
 
     // 8. MODAL DE GRÁFICA TIPO MONTAÑA DE COBRANZA
-    const openChartBtn = document.getElementById('openChartBtn');
+    const openChartBtn = document.getElementById('openChartModalBtn') || document.getElementById('openChartBtn');
     const closeChartBtn = document.getElementById('closeChartBtn');
     const chartModal = document.getElementById('chartModal');
     const chartCenterTodayBtn = document.getElementById('chartCenterTodayBtn');
@@ -2378,11 +2396,13 @@
     const chartView30Days = document.getElementById('chartView30Days');
     const chartView60Days = document.getElementById('chartView60Days');
 
-    openChartBtn.addEventListener('click', () => {
-      chartCenterDate = new Date();
-      chartModal.classList.remove('hidden');
-      setTimeout(renderMountainChart, 50);
-    });
+    if (openChartBtn) {
+      openChartBtn.addEventListener('click', () => {
+        chartCenterDate = new Date();
+        chartModal.classList.remove('hidden');
+        setTimeout(renderMountainChart, 50);
+      });
+    }
 
     closeChartBtn.addEventListener('click', () => chartModal.classList.add('hidden'));
 
@@ -2950,21 +2970,7 @@
       XLSX.writeFile(wb, `Control_Cobranza_${toLocalDateString(new Date())}.xlsx`);
     });
 
-    // 13. DESCARGA STANDALONE
-    document.getElementById('downloadStandalonePageBtn').addEventListener('click', () => {
-      const htmlContent = document.documentElement.outerHTML;
-      const blob = new Blob([`<!DOCTYPE html>\n${htmlContent}`], { type: 'text/html;charset=utf-8' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = 'index.html';
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
-    });
-
-    // 14. SINCRONIZACIÓN DE SCROLLBAR SUPERIOR DUAL
+    // 13. SINCRONIZACIÓN DE SCROLLBAR SUPERIOR DUAL
     const topScrollSync = document.getElementById('topScrollSync');
     const tableScrollContainer = document.getElementById('tableScrollContainer');
     const scrollLeftBtn = document.getElementById('scrollLeftBtn');

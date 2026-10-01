@@ -9,7 +9,6 @@ import {
   Users, 
   FileSpreadsheet, 
   Download, 
-  ArrowDownToLine, 
   LogOut, 
   AlertTriangle, 
   Filter, 
@@ -1444,28 +1443,6 @@ export default function App() {
     XLSX.writeFile(wb, `Control_Cobranza_CFDI_${toLocalDateString(new Date())}.xlsx`);
   };
 
-  // Download Standalone index.html
-  const handleDownloadStandalone = async () => {
-    try {
-      const response = await fetch('/standalone.html');
-      if (response.ok) {
-        const text = await response.text();
-        const blob = new Blob([text], { type: 'text/html;charset=utf-8' });
-        const url = URL.createObjectURL(blob);
-        const link = document.createElement('a');
-        link.href = url;
-        link.download = 'index.html';
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-        URL.revokeObjectURL(url);
-        return;
-      }
-    } catch (e) {
-      console.warn('Fallback generating standalone blob', e);
-    }
-  };
-
   // Add client in modal
   const handleAddClient = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -1641,87 +1618,94 @@ export default function App() {
 
       {/* HEADER: FULL WIDTH */}
       <header className="bg-slate-900/90 border-b border-slate-800 sticky top-0 z-40 backdrop-blur-md w-full">
-        <div className="w-full px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between gap-4">
-          <div className="flex items-center gap-3 shrink-0">
-            <div className="w-10 h-10 bg-emerald-950 border border-emerald-500/40 rounded-xl flex items-center justify-center text-emerald-400 shadow-md shadow-emerald-950 shrink-0">
-              <Receipt className="w-5 h-5" />
+        <div className="w-full px-3 sm:px-6 lg:px-8 min-h-[4rem] py-2 sm:py-0 flex flex-col sm:flex-row items-center justify-between gap-2.5 sm:gap-4">
+          <div className="flex items-center justify-between w-full sm:w-auto gap-3 shrink-0">
+            <div className="flex items-center gap-2.5 sm:gap-3">
+              <div className="w-9 h-9 sm:w-10 sm:h-10 bg-emerald-950 border border-emerald-500/40 rounded-xl flex items-center justify-center text-emerald-400 shadow-md shadow-emerald-950 shrink-0">
+                <Receipt className="w-4 h-4 sm:w-5 sm:h-5" />
+              </div>
+              <div>
+                <h1 className="text-sm sm:text-base font-bold text-white leading-tight">Control de Cobranza CFDI</h1>
+                <p className="text-[10px] sm:text-[11px] text-emerald-400 font-medium flex items-center gap-1.5">
+                  <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+                  <span>{isFirebaseConnected ? 'Cloud Firestore Conectado' : 'Conectando a base de datos...'}</span>
+                </p>
+              </div>
             </div>
-            <div>
-              <h1 className="text-base font-bold text-white leading-tight">Control de Cobranza CFDI</h1>
-              <p className="text-[11px] text-emerald-400 font-medium flex items-center gap-1.5">
-                <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-                {isFirebaseConnected ? 'Cloud Firestore Conectado en Tiempo Real' : 'Conectando a base de datos...'}
-              </p>
-            </div>
+
+            {/* Logout button visible on mobile header */}
+            <button
+              onClick={handleLogout}
+              title="Cerrar sesión"
+              className="sm:hidden p-1.5 text-slate-400 hover:text-rose-400 rounded-lg hover:bg-slate-800"
+            >
+              <LogOut className="w-4 h-4" />
+            </button>
           </div>
 
-          {/* Action buttons */}
-          <div className="flex items-center gap-2 flex-wrap justify-end">
+          {/* Action buttons with proper wrap, gap-2 and full labels */}
+          <div className="flex flex-wrap items-center gap-2 w-full md:w-auto justify-start md:justify-end">
             
             {/* BOTÓN: GRÁFICA DE COBRANZA */}
             <button
+              id="openChartModalBtn"
               onClick={() => {
                 setChartCenterDate(new Date());
                 setShowChartModal(true);
               }}
-              className="px-3 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white rounded-xl text-xs font-semibold border border-slate-700 hover:border-emerald-500/40 transition-all flex items-center gap-1.5 shadow-sm cursor-pointer"
+              className="px-3 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white rounded-xl text-xs font-semibold border border-slate-700 hover:border-emerald-500/40 transition-all flex items-center gap-1.5 shadow-sm cursor-pointer whitespace-nowrap shrink-0"
+              title="Abrir flujo financiero y proyección en gráfica tipo montaña"
             >
               <TrendingUp className="w-4 h-4 text-emerald-400" />
-              <span className="hidden sm:inline">Gráfica de Cobranza</span>
+              <span>Gráfica de Cobranza</span>
             </button>
 
             {/* Calendario de Cobranza */}
             <button
+              id="openCalendarBtn"
               onClick={() => setShowCalendarModal(true)}
-              className="px-3 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white rounded-xl text-xs font-semibold border border-slate-700 hover:border-emerald-500/40 transition-all flex items-center gap-1.5 shadow-sm cursor-pointer"
+              className="px-3 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white rounded-xl text-xs font-semibold border border-slate-700 hover:border-emerald-500/40 transition-all flex items-center gap-1.5 shadow-sm cursor-pointer whitespace-nowrap shrink-0"
             >
               <CalendarIcon className="w-4 h-4 text-emerald-400" />
-              <span className="hidden sm:inline">Calendario de Cobranza</span>
+              <span>Calendario de Cobranza</span>
             </button>
 
             {/* Directorio de Clientes */}
             <button
+              id="openClientsBtn"
               onClick={() => setShowClientsModal(true)}
-              className="px-3 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white rounded-xl text-xs font-semibold border border-slate-700 hover:border-blue-500/40 transition-all flex items-center gap-1.5 shadow-sm cursor-pointer"
+              className="px-3 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white rounded-xl text-xs font-semibold border border-slate-700 hover:border-blue-500/40 transition-all flex items-center gap-1.5 shadow-sm cursor-pointer whitespace-nowrap shrink-0"
             >
               <Users className="w-4 h-4 text-blue-400" />
-              <span className="hidden sm:inline">Directorio de Clientes</span>
+              <span>Directorio de Clientes</span>
             </button>
 
             {/* Importar CSV Anual */}
             <button
+              id="openCsvImportBtn"
               onClick={() => setShowCsvModal(true)}
-              className="px-3 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white rounded-xl text-xs font-semibold border border-slate-700 hover:border-amber-500/40 transition-all flex items-center gap-1.5 shadow-sm cursor-pointer"
+              className="px-3 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white rounded-xl text-xs font-semibold border border-slate-700 hover:border-amber-500/40 transition-all flex items-center gap-1.5 shadow-sm cursor-pointer whitespace-nowrap shrink-0"
             >
               <FileSpreadsheet className="w-4 h-4 text-amber-400" />
-              <span className="hidden sm:inline">Importar CSV Anual</span>
+              <span>Importar CSV Anual</span>
             </button>
 
             {/* Excel */}
             <button
+              id="exportExcelBtn"
               onClick={handleExportExcel}
-              className="px-3 py-2 bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-300 border border-emerald-500/40 rounded-xl text-xs font-semibold transition-all flex items-center gap-1.5 shadow-sm cursor-pointer"
+              className="px-3 py-2 bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-300 border border-emerald-500/40 rounded-xl text-xs font-semibold transition-all flex items-center gap-1.5 shadow-sm cursor-pointer whitespace-nowrap shrink-0"
             >
               <Download className="w-4 h-4 text-emerald-400" />
-              <span className="hidden sm:inline">Excel</span>
+              <span>Excel</span>
             </button>
 
-            {/* Descargar index.html (Netlify) */}
+            {/* Cerrar Sesión (Desktop) */}
             <button
-              onClick={handleDownloadStandalone}
-              className="px-3 py-2 bg-purple-600/25 hover:bg-purple-600/40 text-purple-200 border border-purple-500/40 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 shadow-sm cursor-pointer"
-              title="Descargar index.html standalone completo listo para desplegar en Netlify"
-            >
-              <ArrowDownToLine className="w-4 h-4 text-purple-400" />
-              <span className="hidden md:inline">Descargar index.html (Netlify)</span>
-              <span className="md:hidden">Netlify</span>
-            </button>
-
-            {/* Cerrar Sesión */}
-            <button
+              id="logoutBtn"
               onClick={handleLogout}
               title="Cerrar sesión"
-              className="p-2 text-slate-400 hover:text-rose-400 hover:bg-rose-950/30 rounded-xl border border-transparent hover:border-rose-900 transition-all cursor-pointer"
+              className="hidden md:inline-flex p-2 text-slate-400 hover:text-rose-400 hover:bg-rose-950/30 rounded-xl border border-transparent hover:border-rose-900 transition-all cursor-pointer shrink-0"
             >
               <LogOut className="w-4 h-4" />
             </button>
@@ -1790,50 +1774,50 @@ export default function App() {
             </div>
           </div>
 
-          {/* 4 Cards Grid */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5">
-            <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-4 shadow-md relative overflow-hidden">
+          {/* 4 Cards Grid (2x2 en móvil, 4 cols en desktop) */}
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5 sm:gap-3.5">
+            <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-3 sm:p-4 shadow-md relative overflow-hidden">
               <div className="flex items-center justify-between text-slate-400 text-xs font-semibold mb-1">
-                <span>Monto Total Facturado</span>
-                <div className="w-7 h-7 bg-blue-950/60 rounded-lg flex items-center justify-center text-blue-400">
-                  <DollarSign className="w-4 h-4" />
+                <span className="truncate text-[11px] sm:text-xs">Monto Total Facturado</span>
+                <div className="w-6 h-6 sm:w-7 sm:h-7 bg-blue-950/60 rounded-lg flex items-center justify-center text-blue-400 shrink-0">
+                  <DollarSign className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
                 </div>
               </div>
-              <div className="text-2xl font-black text-white">{formatCurrency(metrics.totalFacturado)}</div>
-              <div className="text-[11px] text-slate-400 mt-1">{metrics.countFacturas} comprobantes activos</div>
+              <div className="text-base sm:text-xl lg:text-2xl font-black text-white truncate">{formatCurrency(metrics.totalFacturado)}</div>
+              <div className="text-[10px] sm:text-[11px] text-slate-400 mt-1 truncate">{metrics.countFacturas} comprobantes activos</div>
             </div>
 
-            <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-4 shadow-md relative overflow-hidden">
+            <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-3 sm:p-4 shadow-md relative overflow-hidden">
               <div className="flex items-center justify-between text-slate-400 text-xs font-semibold mb-1">
-                <span>Pendiente de Cobro</span>
-                <div className="w-7 h-7 bg-amber-950/60 rounded-lg flex items-center justify-center text-amber-400">
-                  <Clock className="w-4 h-4" />
+                <span className="truncate text-[11px] sm:text-xs">Pendiente de Cobro</span>
+                <div className="w-6 h-6 sm:w-7 sm:h-7 bg-amber-950/60 rounded-lg flex items-center justify-center text-amber-400 shrink-0">
+                  <Clock className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
                 </div>
               </div>
-              <div className="text-2xl font-black text-amber-400">{formatCurrency(metrics.pendienteCobro)}</div>
-              <div className="text-[11px] text-amber-300/80 mt-1">{metrics.countPendiente} facturas por liquidar</div>
+              <div className="text-base sm:text-xl lg:text-2xl font-black text-amber-400 truncate">{formatCurrency(metrics.pendienteCobro)}</div>
+              <div className="text-[10px] sm:text-[11px] text-amber-300/80 mt-1 truncate">{metrics.countPendiente} facturas por liquidar</div>
             </div>
 
-            <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-4 shadow-md relative overflow-hidden">
+            <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-3 sm:p-4 shadow-md relative overflow-hidden">
               <div className="flex items-center justify-between text-slate-400 text-xs font-semibold mb-1">
-                <span>Total Cobrado</span>
-                <div className="w-7 h-7 bg-emerald-950/60 rounded-lg flex items-center justify-center text-emerald-400">
-                  <CheckCircle2 className="w-4 h-4" />
+                <span className="truncate text-[11px] sm:text-xs">Total Cobrado</span>
+                <div className="w-6 h-6 sm:w-7 sm:h-7 bg-emerald-950/60 rounded-lg flex items-center justify-center text-emerald-400 shrink-0">
+                  <CheckCircle2 className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
                 </div>
               </div>
-              <div className="text-2xl font-black text-emerald-400">{formatCurrency(metrics.totalCobrado)}</div>
-              <div className="text-[11px] text-emerald-300/80 mt-1">{metrics.countCobrado} facturas concluidas</div>
+              <div className="text-base sm:text-xl lg:text-2xl font-black text-emerald-400 truncate">{formatCurrency(metrics.totalCobrado)}</div>
+              <div className="text-[10px] sm:text-[11px] text-emerald-300/80 mt-1 truncate">{metrics.countCobrado} facturas concluidas</div>
             </div>
 
-            <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-4 shadow-md relative overflow-hidden">
+            <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-3 sm:p-4 shadow-md relative overflow-hidden">
               <div className="flex items-center justify-between text-slate-400 text-xs font-semibold mb-1">
-                <span>Procedimiento Parcial</span>
-                <div className="w-7 h-7 bg-rose-950/60 rounded-lg flex items-center justify-center text-rose-400">
-                  <AlertCircle className="w-4 h-4" />
+                <span className="truncate text-[11px] sm:text-xs">Procedimiento Parcial</span>
+                <div className="w-6 h-6 sm:w-7 sm:h-7 bg-rose-950/60 rounded-lg flex items-center justify-center text-rose-400 shrink-0">
+                  <AlertCircle className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
                 </div>
               </div>
-              <div className="text-2xl font-black text-rose-400">{formatCurrency(metrics.problemaMonto)}</div>
-              <div className="text-[11px] text-rose-300/80 mt-1">{metrics.countProblema} facturas en revisión</div>
+              <div className="text-base sm:text-xl lg:text-2xl font-black text-rose-400 truncate">{formatCurrency(metrics.problemaMonto)}</div>
+              <div className="text-[10px] sm:text-[11px] text-rose-300/80 mt-1 truncate">{metrics.countProblema} facturas en revisión</div>
             </div>
           </div>
         </div>
@@ -1877,12 +1861,12 @@ export default function App() {
                 </span>
               </div>
 
-              {/* Grupo Buscador y Botón Atención Urgente */}
-              <div className="flex items-center gap-2.5 w-full md:w-auto">
+              {/* Grupo Buscador, Botón Atención Urgente y Botón Facturas con Problema */}
+              <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5 w-full md:w-auto">
                 <button
                   type="button"
                   onClick={() => setShowUrgentModal(true)}
-                  className={`px-3.5 py-2.5 rounded-xl text-xs font-bold border flex items-center gap-2 transition-all shadow-sm cursor-pointer whitespace-nowrap ${
+                  className={`w-full sm:w-auto justify-center px-3.5 py-2.5 rounded-xl text-xs font-bold border flex items-center gap-2 transition-all shadow-sm cursor-pointer whitespace-nowrap ${
                     urgentInvoices.length > 0
                       ? 'bg-amber-950/40 hover:bg-amber-900/60 border-amber-500/50 text-amber-200 shadow-amber-950/50 ring-1 ring-amber-500/30'
                       : 'bg-slate-800/90 hover:bg-slate-800 border-slate-700/80 text-slate-400'
@@ -1910,7 +1894,7 @@ export default function App() {
                 <button
                   type="button"
                   onClick={() => setShowProblemaModal(true)}
-                  className={`px-3.5 py-2.5 rounded-xl text-xs font-bold border flex items-center gap-2 transition-all shadow-sm cursor-pointer whitespace-nowrap ${
+                  className={`w-full sm:w-auto justify-center px-3.5 py-2.5 rounded-xl text-xs font-bold border flex items-center gap-2 transition-all shadow-sm cursor-pointer whitespace-nowrap ${
                     problemaInvoices.length > 0
                       ? 'bg-rose-950/40 hover:bg-rose-900/60 border-rose-500/50 text-rose-200 shadow-rose-950/50 ring-1 ring-rose-500/30'
                       : 'bg-slate-800/90 hover:bg-slate-800 border-slate-700/80 text-slate-400'
@@ -2107,10 +2091,11 @@ export default function App() {
             </div>
           </div>
 
-          {/* Tabla de 10 Columnas Completa */}
+          {/* Tabla de 10 Columnas Completa (con aceleración táctil para móviles) */}
           <div
             ref={tableContainerRef}
-            className="w-full overflow-x-auto overflow-y-auto max-h-[70vh] shadow-md rounded-xl p-2 min-h-[380px] focus:outline-none"
+            className="w-full overflow-x-auto overflow-y-auto max-h-[70vh] shadow-md rounded-xl p-2 min-h-[380px] focus:outline-none touch-scroll"
+            style={{ WebkitOverflowScrolling: 'touch' }}
           >
             <table className="w-full min-w-[1700px] text-left text-xs border-collapse">
               <thead>
@@ -2276,12 +2261,12 @@ export default function App() {
 
       {/* ==================== NUEVO MODAL: GRÁFICA TIPO MONTAÑA DE COBRANZA ==================== */}
       {showChartModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/85 backdrop-blur-md p-3 sm:p-5 overflow-y-auto">
-          <div className="bg-slate-900 border border-slate-800 rounded-3xl w-full max-w-6xl p-5 sm:p-7 shadow-2xl space-y-5 my-auto">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/85 backdrop-blur-md p-2 sm:p-5 overflow-y-auto">
+          <div className="bg-slate-900 border border-slate-800 rounded-3xl w-full max-w-6xl p-4 sm:p-7 shadow-2xl space-y-4 sm:space-y-5 my-auto max-h-[94vh] sm:max-h-[90vh] overflow-y-auto touch-scroll">
             
             <div className="flex items-center justify-between pb-3 border-b border-slate-800">
               <div className="flex items-center gap-3">
-                <div className="w-10 h-10 bg-emerald-950 border border-emerald-500/40 rounded-xl flex items-center justify-center text-emerald-400">
+                <div className="w-10 h-10 bg-emerald-950 border border-emerald-500/40 rounded-xl flex items-center justify-center text-emerald-400 shrink-0">
                   <TrendingUp className="w-5 h-5" />
                 </div>
                 <div>
