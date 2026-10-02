@@ -6,6 +6,17 @@
   <title>Sistema de Control y Cobranza de Facturas CFDI</title>
   <meta name="description" content="Gestión integral de cuentas por cobrar, calendario de cobranza, cruce de complementos, gráfica de montaña y validación de secuencias fiscales CFDI." />
   
+  <!-- Configuración PWA para Android e iOS -->
+  <meta name="theme-color" content="#020617" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="Cobranza CFDI" />
+  <meta name="application-name" content="Cobranza CFDI" />
+  <link rel="manifest" href="./manifest.json" />
+  <link rel="icon" type="image/svg+xml" href="./icon.svg" />
+  <link rel="apple-touch-icon" href="./icon.svg" />
+
   <!-- Tailwind CSS CDN -->
   <script src="https://cdn.tailwindcss.com"></script>
   <script>
@@ -203,15 +214,38 @@
             </div>
           </div>
 
-          <!-- Cerrar Sesión (Visible en esquina superior en móvil) -->
-          <button 
-            type="button"
-            onclick="document.getElementById('logoutBtn').click()"
-            class="md:hidden p-2 text-slate-400 hover:text-rose-400 rounded-lg hover:bg-slate-800"
-            title="Cerrar sesión"
-          >
-            <i data-lucide="log-out" class="w-4 h-4"></i>
-          </button>
+          <div class="flex items-center gap-1.5 md:hidden">
+            <!-- Botón PWA en Header Móvil -->
+            <button 
+              id="pwaHeaderInstallBtn"
+              type="button"
+              class="hidden px-2.5 py-1.5 bg-emerald-600/25 hover:bg-emerald-600/40 text-emerald-300 border border-emerald-500/40 rounded-xl text-xs font-bold transition-all items-center gap-1 shadow-sm cursor-pointer"
+              title="Instalar en Celular"
+            >
+              <i data-lucide="smartphone" class="w-3.5 h-3.5 text-emerald-400"></i>
+              <span>📱 Instalar</span>
+            </button>
+
+            <!-- Botón Notificaciones en Móvil -->
+            <button 
+              id="mobileNotificationBtn"
+              type="button"
+              class="p-2 text-slate-400 hover:text-amber-400 rounded-lg hover:bg-slate-800 transition-colors"
+              title="Avisos y Notificaciones"
+            >
+              <i data-lucide="bell" id="mobileNotificationIcon" class="w-4 h-4"></i>
+            </button>
+
+            <!-- Cerrar Sesión (Visible en esquina superior en móvil) -->
+            <button 
+              type="button"
+              onclick="document.getElementById('logoutBtn').click()"
+              class="p-2 text-slate-400 hover:text-rose-400 rounded-lg hover:bg-slate-800"
+              title="Cerrar sesión"
+            >
+              <i data-lucide="log-out" class="w-4 h-4"></i>
+            </button>
+          </div>
         </div>
 
         <!-- Botones de Acción Global distribuidos con holgura sin traslapes -->
@@ -261,6 +295,17 @@
           >
             <i data-lucide="download" class="w-4 h-4 text-emerald-400"></i>
             <span>Excel</span>
+          </button>
+
+          <!-- Activar / Gestionar Notificaciones PWA -->
+          <button 
+            id="toggleNotificationsBtn"
+            type="button"
+            class="px-3 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white rounded-xl text-xs font-semibold border border-slate-700 hover:border-amber-500/40 transition-all flex items-center gap-1.5 shadow-sm cursor-pointer whitespace-nowrap shrink-0"
+            title="Activar avisos de facturas por vencer y nuevas facturas"
+          >
+            <i data-lucide="bell" id="notificationBtnIcon" class="w-4 h-4 text-amber-400"></i>
+            <span id="notificationBtnText">Avisos</span>
           </button>
 
           <!-- Cerrar Sesión (Desktop) -->
@@ -1243,6 +1288,9 @@
 
         invoices = items;
         renderAll();
+        if (typeof checkUpcomingDueInvoices === 'function') {
+          checkUpcomingDueInvoices(items);
+        }
       }, (error) => {
         console.error('Error Firestore Invoices:', error);
       });
@@ -1616,15 +1664,23 @@
         totalFacturado += inv.monto_total;
         countFacturas++;
 
+        // 1. Total Cobrado: 'Finalizado' y 'Pagada sin complemento'
         if (inv.estatus === 'Finalizado' || inv.estatus === 'Pagada sin complemento') {
           totalCobrado += inv.monto_total;
           countCobrado++;
-        } else if (inv.estatus === 'Procedimiento parcial' || inv.estatus === 'Problema') {
-          problemaMonto += inv.monto_total;
-          countProblema++;
-        } else {
+        }
+
+        // 2. Pendiente de Cobro: 'Generado', 'Procedimiento terminado', 'Procedimiento parcial' y 'Problema'
+        const esPendienteDeCobro = ['Generado', 'Procedimiento terminado', 'Procedimiento parcial', 'Problema'].includes(inv.estatus);
+        if (esPendienteDeCobro) {
           pendienteCobro += inv.monto_total;
           countPendiente++;
+        }
+
+        // 3. Desglose informativo: Procedimiento Parcial / Revisión
+        if (inv.estatus === 'Procedimiento parcial' || inv.estatus === 'Problema') {
+          problemaMonto += inv.monto_total;
+          countProblema++;
         }
       });
 
@@ -2390,6 +2446,14 @@
             msg += ' (Hueco/registro previo actualizado sin duplicidad)';
           }
 
+          if (typeof notifyViaServiceWorker === 'function') {
+            notifyViaServiceWorker(
+              isComplement ? '📄 Complemento de Pago Registrado' : '📄 Nueva Factura CFDI Registrada',
+              msg,
+              'cfdi-upload-' + Date.now()
+            );
+          }
+
           alert(msg);
         } catch (err) {
           console.error('Error al procesar XML:', err);
@@ -2488,7 +2552,7 @@
           if (inv.fecha_probable_pago === ymd) {
             if (inv.estatus === 'Finalizado' || inv.estatus === 'Pagada sin complemento') {
               dayCobrado += inv.monto_total;
-            } else {
+            } else if (['Generado', 'Procedimiento terminado', 'Procedimiento parcial', 'Problema'].includes(inv.estatus)) {
               dayPendiente += inv.monto_total;
             }
           }
@@ -2948,6 +3012,14 @@
             committed += count;
           }
 
+          if (typeof notifyViaServiceWorker === 'function') {
+            notifyViaServiceWorker(
+              '📥 Importación CFDI Completada',
+              `Se procesaron e ingresaron ${committed} facturas exitosamente al sistema.`,
+              'cfdi-import-' + Date.now()
+            );
+          }
+
           alert(`¡Se procesaron ${committed} facturas exitosamente en Cloud Firestore!`);
           csvModal.classList.add('hidden');
         } catch (err) {
@@ -3148,6 +3220,408 @@
 
     // Iniciar verificación de sesión
     checkAuth();
+
+    // ==========================================
+    // 15. SOPORTE PWA E INSTALACIÓN EN ANDROID
+    // ==========================================
+    
+    // A. Inyección dinámica de Web App Manifest autónomo (Data-URI/Blob)
+    (function initPwaManifest() {
+      try {
+        const iconSvg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512"><rect width="512" height="512" rx="100" fill="#020617"/><rect x="36" y="36" width="440" height="440" rx="88" fill="#064e3b" stroke="#10b981" stroke-width="12"/><g transform="translate(106, 96) scale(12.5)" fill="none" stroke="#34d399" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 2v20l2-1 2 1 2-1 2 1 2-1 2 1 2-1 2 1V2l-2 1-2-1-2 1-2-1-2 1-2-1-2 1Z"/><path d="M16 8h-6a2 2 0 1 0 0 4h4a2 2 0 1 1 0 4H8"/><path d="M12 17.5v-11"/></g></svg>`;
+        const iconDataUri = 'data:image/svg+xml;base64,' + btoa(unescape(encodeURIComponent(iconSvg)));
+
+        // Asegurar iconos apple-touch-icon y favicon
+        let appleIcon = document.querySelector('link[rel="apple-touch-icon"]');
+        if (appleIcon && !appleIcon.getAttribute('href')) {
+          appleIcon.href = iconDataUri;
+        }
+
+        const manifestObj = {
+          id: './',
+          name: 'Control de Cobranza CFDI',
+          short_name: 'Cobranza CFDI',
+          description: 'Sistema de gestión integral de cobranza CFDI, control de facturas y calendario de cobro.',
+          start_url: './',
+          scope: './',
+          display: 'standalone',
+          orientation: 'portrait-primary',
+          background_color: '#020617',
+          theme_color: '#020617',
+          icons: [
+            {
+              src: iconDataUri,
+              sizes: '192x192 512x512',
+              type: 'image/svg+xml',
+              purpose: 'any'
+            },
+            {
+              src: iconDataUri,
+              sizes: '192x192 512x512',
+              type: 'image/svg+xml',
+              purpose: 'maskable'
+            }
+          ]
+        };
+
+        const manifestBlob = new Blob([JSON.stringify(manifestObj)], { type: 'application/manifest+json' });
+        const manifestUrl = URL.createObjectURL(manifestBlob);
+        let manifestEl = document.querySelector('link[rel="manifest"]');
+        if (!manifestEl) {
+          manifestEl = document.createElement('link');
+          manifestEl.rel = 'manifest';
+          manifestEl.href = manifestUrl;
+          document.head.appendChild(manifestEl);
+        }
+      } catch (err) {
+        console.warn('Error inicializando Web App Manifest dinámico:', err);
+      }
+    })();
+
+    // B. Registro de Service Worker con soporte Push y Notificaciones Locales
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', () => {
+        navigator.serviceWorker.register('./sw.js')
+          .catch(() => {
+            const swCode = `
+              const CACHE_NAME = 'cobranza-sw-v1';
+              self.addEventListener('install', (e) => { self.skipWaiting(); });
+              self.addEventListener('activate', (e) => { e.waitUntil(clients.claim()); });
+              self.addEventListener('fetch', (e) => {
+                if (e.request.method !== 'GET') return;
+                const url = new URL(e.request.url);
+                if (url.origin.includes('firestore') || url.origin.includes('googleapis') || url.origin.includes('identitytoolkit')) return;
+                e.respondWith(
+                  fetch(e.request).catch(() => caches.match(e.request))
+                );
+              });
+              self.addEventListener('message', (e) => {
+                if (e.data && e.data.type === 'SHOW_NOTIFICATION') {
+                  const { title, options } = e.data;
+                  self.registration.showNotification(title || 'Cobranza CFDI', {
+                    icon: './icon.svg',
+                    badge: './icon.svg',
+                    vibrate: [200, 100, 200, 100, 200],
+                    tag: options?.tag || 'cfdi-notif',
+                    renotify: true,
+                    requireInteraction: true,
+                    data: { url: options?.url || './', dateOfArrival: Date.now() },
+                    actions: [
+                      { action: 'open_app', title: '📱 Abrir Sistema' },
+                      { action: 'dismiss', title: 'Cerrar' }
+                    ],
+                    ...options
+                  });
+                }
+              });
+              self.addEventListener('push', (e) => {
+                let data = { title: 'Cobranza CFDI', body: 'Tienes facturas pendientes o actualizaciones en el sistema.' };
+                if (e.data) {
+                  try { data = e.data.json(); } catch (err) { data.body = e.data.text(); }
+                }
+                e.waitUntil(
+                  self.registration.showNotification(data.title || 'Cobranza CFDI', {
+                    body: data.body,
+                    icon: './icon.svg',
+                    badge: './icon.svg',
+                    vibrate: [200, 100, 200, 100, 200],
+                    tag: data.tag || 'cfdi-push',
+                    renotify: true,
+                    requireInteraction: true,
+                    data: { url: data.url || './' },
+                    actions: [
+                      { action: 'open_app', title: '📱 Abrir Sistema' }
+                    ]
+                  })
+                );
+              });
+              self.addEventListener('notificationclick', (e) => {
+                e.notification.close();
+                if (e.action === 'dismiss') return;
+                const targetUrl = e.notification.data?.url || './';
+                e.waitUntil(
+                  clients.matchAll({ type: 'window', includeUncontrolled: true }).then((list) => {
+                    for (const client of list) {
+                      if (client.url && 'focus' in client) return client.focus();
+                    }
+                    if (clients.openWindow) return clients.openWindow(targetUrl);
+                  })
+                );
+              });
+            `;
+            const blob = new Blob([swCode], { type: 'text/javascript' });
+            return navigator.serviceWorker.register(URL.createObjectURL(blob));
+          })
+          .then((reg) => {
+            console.log('Service Worker PWA registrado exitosamente:', reg.scope);
+          })
+          .catch((err) => {
+            console.warn('Registro de Service Worker PWA advertencia:', err);
+          });
+      });
+    }
+
+    // ==========================================
+    // 16. GESTOR DE NOTIFICACIONES PUSH / SERVICE WORKER
+    // ==========================================
+    async function notifyViaServiceWorker(title, body, tag = 'cfdi-alert', url = './') {
+      if (!('Notification' in window)) return;
+      if (Notification.permission !== 'granted') return;
+
+      const options = {
+        body,
+        icon: './icon.svg',
+        badge: './icon.svg',
+        tag,
+        renotify: true,
+        data: { url }
+      };
+
+      try {
+        if ('serviceWorker' in navigator && navigator.serviceWorker.controller) {
+          navigator.serviceWorker.controller.postMessage({
+            type: 'SHOW_NOTIFICATION',
+            title,
+            options
+          });
+        } else if ('serviceWorker' in navigator) {
+          const reg = await navigator.serviceWorker.ready;
+          reg.showNotification(title, options);
+        } else {
+          new Notification(title, options);
+        }
+      } catch (err) {
+        console.warn('Error al emitir notificación por Service Worker:', err);
+        try {
+          new Notification(title, options);
+        } catch (e) {}
+      }
+    }
+
+    // Comprobación de facturas próximas a vencer
+    function checkUpcomingDueInvoices(invList) {
+      if (!('Notification' in window) || Notification.permission !== 'granted') return;
+      const todayYMD = toLocalDateString(new Date());
+      const sessionKey = 'notified_due_date_' + todayYMD;
+      if (sessionStorage.getItem(sessionKey)) return;
+
+      const maxDate = new Date();
+      maxDate.setDate(maxDate.getDate() + 3);
+      const maxDateYMD = toLocalDateString(maxDate);
+
+      const dueInvoices = (invList || []).filter(inv => {
+        if (inv.estatus === 'Cancelada' || inv.estatus === 'Complemento' || inv.monto_total <= 0) return false;
+        const isPending = ['Generado', 'Procedimiento terminado', 'Procedimiento parcial', 'Problema'].includes(inv.estatus);
+        if (!isPending) return false;
+        return inv.fecha_probable_pago && inv.fecha_probable_pago >= todayYMD && inv.fecha_probable_pago <= maxDateYMD;
+      });
+
+      if (dueInvoices.length > 0) {
+        sessionStorage.setItem(sessionKey, 'true');
+        const sumMonto = dueInvoices.reduce((acc, curr) => acc + curr.monto_total, 0);
+        const fmt = new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN' }).format(sumMonto);
+        notifyViaServiceWorker(
+          '⏰ Facturas Próximas a Vencer',
+          `Tienes ${dueInvoices.length} factura(s) por vencer en los próximos 3 días (${fmt}).`,
+          'cfdi-due-alert'
+        );
+      }
+    }
+
+    // Configuración de botones UI de Notificaciones
+    const toggleNotificationsBtn = document.getElementById('toggleNotificationsBtn');
+    const notificationBtnIcon = document.getElementById('notificationBtnIcon');
+    const notificationBtnText = document.getElementById('notificationBtnText');
+    const mobileNotificationBtn = document.getElementById('mobileNotificationBtn');
+    const mobileNotificationIcon = document.getElementById('mobileNotificationIcon');
+
+    function updateNotificationUI() {
+      const isGranted = ('Notification' in window) && Notification.permission === 'granted';
+      if (toggleNotificationsBtn) {
+        if (isGranted) {
+          toggleNotificationsBtn.className = 'px-3 py-2 bg-emerald-950/80 hover:bg-emerald-900/80 text-emerald-300 border border-emerald-500/60 rounded-xl text-xs font-semibold transition-all flex items-center gap-1.5 shadow-sm cursor-pointer whitespace-nowrap shrink-0 ring-1 ring-emerald-500/20';
+          if (notificationBtnIcon) {
+            notificationBtnIcon.className = 'w-4 h-4 text-emerald-400';
+          }
+          if (notificationBtnText) {
+            notificationBtnText.textContent = 'Avisos Activos';
+          }
+        } else {
+          toggleNotificationsBtn.className = 'px-3 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white rounded-xl text-xs font-semibold border border-slate-700 hover:border-amber-500/40 transition-all flex items-center gap-1.5 shadow-sm cursor-pointer whitespace-nowrap shrink-0';
+          if (notificationBtnIcon) {
+            notificationBtnIcon.className = 'w-4 h-4 text-amber-400';
+          }
+          if (notificationBtnText) {
+            notificationBtnText.textContent = 'Activar Avisos';
+          }
+        }
+      }
+
+      if (mobileNotificationBtn) {
+        if (isGranted) {
+          mobileNotificationBtn.className = 'p-2 text-emerald-400 hover:bg-emerald-950/40 rounded-lg transition-colors';
+        } else {
+          mobileNotificationBtn.className = 'p-2 text-slate-400 hover:text-amber-400 rounded-lg hover:bg-slate-800 transition-colors';
+        }
+      }
+      if (window.lucide) lucide.createIcons();
+    }
+
+    async function handleToggleNotifications() {
+      if (!('Notification' in window)) {
+        alert('Este navegador no soporta notificaciones push/Service Worker.');
+        return;
+      }
+
+      if (Notification.permission === 'granted') {
+        notifyViaServiceWorker(
+          '🔔 Notificaciones Push Activas',
+          'El sistema te notificará sobre facturas próximas a vencer y nuevos comprobantes cargados.',
+          'cfdi-test-notif'
+        );
+        alert('Las notificaciones ya están activadas en este dispositivo.');
+        updateNotificationUI();
+        return;
+      }
+
+      if (Notification.permission === 'denied') {
+        alert('Has bloqueado las notificaciones para este sitio. Habilítalas desde la configuración del navegador (ícono del candado en la barra de direcciones).');
+        return;
+      }
+
+      try {
+        const perm = await Notification.requestPermission();
+        if (perm === 'granted') {
+          updateNotificationUI();
+          notifyViaServiceWorker(
+            '🔔 Notificaciones Activadas',
+            'Recibirás avisos sobre facturas próximas a vencer y nuevos comprobantes cargados en el sistema.',
+            'cfdi-welcome-notif'
+          );
+          if (invoices && invoices.length > 0) {
+            checkUpcomingDueInvoices(invoices);
+          }
+        } else {
+          alert('Permiso de notificaciones no concedido.');
+        }
+      } catch (err) {
+        console.error('Error solicitando permisos de notificación:', err);
+      }
+    }
+
+    if (toggleNotificationsBtn) {
+      toggleNotificationsBtn.addEventListener('click', handleToggleNotifications);
+    }
+    if (mobileNotificationBtn) {
+      mobileNotificationBtn.addEventListener('click', handleToggleNotifications);
+    }
+    updateNotificationUI();
+
+    // C. Manejo de beforeinstallprompt y Botón/Banner de instalación en Celulares
+    let deferredPwaPrompt = null;
+    const pwaInstallBanner = document.getElementById('pwaInstallBanner');
+    const pwaInstallBannerBtn = document.getElementById('pwaInstallBannerBtn');
+    const pwaDismissBannerBtn = document.getElementById('pwaDismissBannerBtn');
+    const pwaHeaderInstallBtn = document.getElementById('pwaHeaderInstallBtn');
+
+    function isRunningStandalone() {
+      return window.matchMedia('(display-mode: standalone)').matches ||
+             window.navigator.standalone === true ||
+             document.referrer.includes('android-app://');
+    }
+
+    function showPwaInstallPrompts() {
+      if (isRunningStandalone()) return;
+      if (sessionStorage.getItem('pwaPromptDismissed') === 'true') return;
+
+      if (pwaInstallBanner) {
+        pwaInstallBanner.classList.remove('hidden');
+      }
+      if (pwaHeaderInstallBtn) {
+        pwaHeaderInstallBtn.classList.remove('hidden');
+        pwaHeaderInstallBtn.classList.add('inline-flex');
+      }
+      if (window.lucide) lucide.createIcons();
+    }
+
+    function hidePwaInstallPrompts() {
+      if (pwaInstallBanner) pwaInstallBanner.classList.add('hidden');
+      if (pwaHeaderInstallBtn) {
+        pwaHeaderInstallBtn.classList.add('hidden');
+        pwaHeaderInstallBtn.classList.remove('inline-flex');
+      }
+    }
+
+    window.addEventListener('beforeinstallprompt', (e) => {
+      e.preventDefault();
+      deferredPwaPrompt = e;
+      showPwaInstallPrompts();
+    });
+
+    async function triggerPwaInstallation() {
+      if (!deferredPwaPrompt) {
+        alert('Para instalar en Android: pulsa el menú de 3 puntos (⋮) de tu navegador Chrome y selecciona "Instalar aplicación" o "Agregar a la pantalla principal".');
+        return;
+      }
+      deferredPwaPrompt.prompt();
+      const { outcome } = await deferredPwaPrompt.userChoice;
+      if (outcome === 'accepted') {
+        hidePwaInstallPrompts();
+      }
+      deferredPwaPrompt = null;
+    }
+
+    if (pwaInstallBannerBtn) {
+      pwaInstallBannerBtn.addEventListener('click', triggerPwaInstallation);
+    }
+    if (pwaHeaderInstallBtn) {
+      pwaHeaderInstallBtn.addEventListener('click', triggerPwaInstallation);
+    }
+    if (pwaDismissBannerBtn) {
+      pwaDismissBannerBtn.addEventListener('click', () => {
+        sessionStorage.setItem('pwaPromptDismissed', 'true');
+        hidePwaInstallPrompts();
+      });
+    }
+
+    window.addEventListener('appinstalled', () => {
+      hidePwaInstallPrompts();
+      deferredPwaPrompt = null;
+      console.log('¡Aplicación Control de Cobranza CFDI instalada con éxito!');
+    });
   </script>
+
+  <!-- ==================== BANNER FLOTANTE DE INSTALACIÓN PWA (MÓVIL / ANDROID) ==================== -->
+  <div 
+    id="pwaInstallBanner" 
+    class="hidden fixed bottom-4 left-3 right-3 sm:left-auto sm:right-5 sm:max-w-sm z-50 bg-slate-900/95 border border-emerald-500/50 rounded-2xl p-3.5 shadow-2xl backdrop-blur-md flex items-center justify-between gap-3 text-white transition-all transform duration-300"
+  >
+    <div class="flex items-center gap-2.5 min-w-0">
+      <div class="w-10 h-10 rounded-xl bg-emerald-950 border border-emerald-500/40 flex items-center justify-center text-emerald-400 shrink-0">
+        <i data-lucide="smartphone" class="w-5 h-5"></i>
+      </div>
+      <div class="min-w-0">
+        <div class="text-xs font-bold text-white leading-tight">Control de Cobranza CFDI</div>
+        <div class="text-[11px] text-slate-400 truncate">App instalable para Android</div>
+      </div>
+    </div>
+    <div class="flex items-center gap-1.5 shrink-0">
+      <button 
+        id="pwaInstallBannerBtn"
+        type="button"
+        class="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl text-xs transition-all shadow-md flex items-center gap-1 cursor-pointer whitespace-nowrap"
+      >
+        <span>📱 Instalar en Celular</span>
+      </button>
+      <button 
+        id="pwaDismissBannerBtn"
+        type="button"
+        class="p-1.5 text-slate-400 hover:text-white rounded-lg hover:bg-slate-800 transition-colors cursor-pointer"
+        title="Cerrar aviso"
+      >
+        <i data-lucide="x" class="w-4 h-4"></i>
+      </button>
+    </div>
+  </div>
 </body>
 </html>

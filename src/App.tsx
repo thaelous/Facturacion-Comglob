@@ -36,7 +36,8 @@ import {
   CalendarRange,
   Building2,
   Bell,
-  AlertOctagon
+  AlertOctagon,
+  Smartphone
 } from 'lucide-react';
 import { initializeApp, getApps, getApp } from 'firebase/app';
 import { 
@@ -590,6 +591,174 @@ export default function App() {
     }
   };
 
+  // PWA Mobile Install state
+  const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
+  const [showPwaBanner, setShowPwaBanner] = useState<boolean>(false);
+
+  useEffect(() => {
+    // Detect standalone mode
+    const isStandalone = window.matchMedia('(display-mode: standalone)').matches || (window.navigator as any).standalone === true;
+    if (isStandalone) return;
+
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', () => {
+        navigator.serviceWorker.register('/sw.js').catch((err) => {
+          console.warn('PWA ServiceWorker note:', err);
+        });
+      });
+    }
+
+    const handleBeforeInstall = (e: Event) => {
+      e.preventDefault();
+      setDeferredPrompt(e);
+      if (sessionStorage.getItem('pwaPromptDismissed') !== 'true') {
+        setShowPwaBanner(true);
+      }
+    };
+
+    const handleAppInstalled = () => {
+      setShowPwaBanner(false);
+      setDeferredPrompt(null);
+    };
+
+    window.addEventListener('beforeinstallprompt', handleBeforeInstall);
+    window.addEventListener('appinstalled', handleAppInstalled);
+
+    return () => {
+      window.removeEventListener('beforeinstallprompt', handleBeforeInstall);
+      window.removeEventListener('appinstalled', handleAppInstalled);
+    };
+  }, []);
+
+  const handleInstallPwa = async () => {
+    if (!deferredPrompt) {
+      alert('Para instalar en Android: pulsa el menú de 3 puntos (⋮) de tu navegador Chrome y selecciona "Instalar aplicación" o "Agregar a la pantalla principal".');
+      return;
+    }
+    deferredPrompt.prompt();
+    const { outcome } = await deferredPrompt.userChoice;
+    if (outcome === 'accepted') {
+      setShowPwaBanner(false);
+    }
+    setDeferredPrompt(null);
+  };
+
+  // Push / Service Worker Notifications
+  const [notificationsActive, setNotificationsActive] = useState<boolean>(() => {
+    return typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'granted';
+  });
+
+  const notifyViaServiceWorker = (title: string, body: string, tag: string = 'cfdi-alert', url: string = './') => {
+    if (!('Notification' in window) || Notification.permission !== 'granted') return;
+    const options = {
+      body,
+      icon: '/icon.svg',
+      badge: '/icon.svg',
+      tag,
+      renotify: true,
+      data: { url }
+    };
+    try {
+      if ('serviceWorker' in navigator && navigator.serviceWorker.controller) {
+        navigator.serviceWorker.controller.postMessage({
+          type: 'SHOW_NOTIFICATION',
+          title,
+          options
+        });
+      } else if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.ready.then((reg) => {
+          reg.showNotification(title, options);
+        }).catch(() => {
+          new Notification(title, options);
+        });
+      } else {
+        new Notification(title, options);
+      }
+    } catch (err) {
+      console.warn('Error al emitir notificación por Service Worker:', err);
+      try {
+        new Notification(title, options);
+      } catch (e) {}
+    }
+  };
+
+  const checkUpcomingDueInvoices = (invList: InvoiceItem[]) => {
+    if (!('Notification' in window) || Notification.permission !== 'granted') return;
+    const todayYMD = toLocalDateString(new Date());
+    const sessionKey = 'notified_due_date_' + todayYMD;
+    if (sessionStorage.getItem(sessionKey)) return;
+
+    const maxDate = new Date();
+    maxDate.setDate(maxDate.getDate() + 3);
+    const maxDateYMD = toLocalDateString(maxDate);
+
+    const dueInvoices = (invList || []).filter((inv) => {
+      if (inv.estatus === 'Cancelada' || inv.estatus === 'Complemento' || inv.monto_total <= 0) return false;
+      const isPending = ['Generado', 'Procedimiento terminado', 'Procedimiento parcial', 'Problema'].includes(inv.estatus);
+      if (!isPending) return false;
+      return inv.fecha_probable_pago && inv.fecha_probable_pago >= todayYMD && inv.fecha_probable_pago <= maxDateYMD;
+    });
+
+    if (dueInvoices.length > 0) {
+      sessionStorage.setItem(sessionKey, 'true');
+      const sumMonto = dueInvoices.reduce((acc, curr) => acc + curr.monto_total, 0);
+      const fmt = new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN' }).format(sumMonto);
+      notifyViaServiceWorker(
+        '⏰ Facturas Próximas a Vencer',
+        `Tienes ${dueInvoices.length} factura(s) por vencer en los próximos 3 días (${fmt}).`,
+        'cfdi-due-alert'
+      );
+    }
+  };
+
+  const handleToggleNotifications = async () => {
+    if (!('Notification' in window)) {
+      alert('Este navegador no soporta notificaciones push/Service Worker.');
+      return;
+    }
+
+    if (Notification.permission === 'granted') {
+      notifyViaServiceWorker(
+        '🔔 Notificaciones Push Activas',
+        'El sistema te notificará sobre facturas próximas a vencer y nuevos comprobantes cargados.',
+        'cfdi-test-notif'
+      );
+      alert('Las notificaciones ya están activadas en este dispositivo.');
+      setNotificationsActive(true);
+      return;
+    }
+
+    if (Notification.permission === 'denied') {
+      alert('Has bloqueado las notificaciones para este sitio. Habilítalas desde la configuración del navegador (ícono del candado en la barra de direcciones).');
+      return;
+    }
+
+    try {
+      const perm = await Notification.requestPermission();
+      if (perm === 'granted') {
+        setNotificationsActive(true);
+        notifyViaServiceWorker(
+          '🔔 Notificaciones Activadas',
+          'Recibirás avisos sobre facturas próximas a vencer y nuevos comprobantes cargados en el sistema.',
+          'cfdi-welcome-notif'
+        );
+        if (invoices.length > 0) {
+          checkUpcomingDueInvoices(invoices);
+        }
+      } else {
+        alert('Permiso de notificaciones no concedido.');
+      }
+    } catch (err) {
+      console.error('Error solicitando permisos de notificación:', err);
+    }
+  };
+
+  useEffect(() => {
+    if (invoices.length > 0 && notificationsActive) {
+      checkUpcomingDueInvoices(invoices);
+    }
+  }, [invoices, notificationsActive]);
+
   const handleLogout = () => {
     sessionStorage.removeItem(AUTH_KEY);
     localStorage.removeItem(AUTH_KEY);
@@ -753,15 +922,23 @@ export default function App() {
       totalFacturado += inv.monto_total;
       countFacturas++;
 
+      // 1. Total Cobrado: 'Finalizado' y 'Pagada sin complemento'
       if (inv.estatus === 'Finalizado' || inv.estatus === 'Pagada sin complemento') {
         totalCobrado += inv.monto_total;
         countCobrado++;
-      } else if (inv.estatus === 'Procedimiento parcial' || inv.estatus === 'Problema') {
-        problemaMonto += inv.monto_total;
-        countProblema++;
-      } else {
+      }
+
+      // 2. Pendiente de Cobro: 'Generado', 'Procedimiento terminado', 'Procedimiento parcial' y 'Problema'
+      const esPendienteDeCobro = ['Generado', 'Procedimiento terminado', 'Procedimiento parcial', 'Problema'].includes(inv.estatus);
+      if (esPendienteDeCobro) {
         pendienteCobro += inv.monto_total;
         countPendiente++;
+      }
+
+      // 3. Desglose informativo de procedimiento parcial / problema
+      if (inv.estatus === 'Procedimiento parcial' || inv.estatus === 'Problema') {
+        problemaMonto += inv.monto_total;
+        countProblema++;
       }
     });
 
@@ -876,7 +1053,7 @@ export default function App() {
         if (inv.fecha_probable_pago === ymd) {
           if (inv.estatus === 'Finalizado' || inv.estatus === 'Pagada sin complemento') {
             dayCobrado += inv.monto_total;
-          } else {
+          } else if (['Generado', 'Procedimiento terminado', 'Procedimiento parcial', 'Problema'].includes(inv.estatus)) {
             dayPendiente += inv.monto_total;
           }
         }
@@ -1308,6 +1485,12 @@ export default function App() {
           msg += ' (Hueco/registro anterior actualizado sin duplicados)';
         }
 
+        notifyViaServiceWorker(
+          isComplement ? '📄 Complemento de Pago Registrado' : '📄 Nueva Factura CFDI Registrada',
+          msg,
+          'cfdi-upload-' + Date.now()
+        );
+
         alert(msg);
       } catch (err) {
         console.error('Error parsing XML:', err);
@@ -1410,6 +1593,12 @@ export default function App() {
           await batch.commit();
           committed += count;
         }
+
+        notifyViaServiceWorker(
+          '📥 Importación CFDI Completada',
+          `Se procesaron e ingresaron ${committed} facturas exitosamente al sistema.`,
+          'cfdi-import-' + Date.now()
+        );
 
         alert(`¡Se procesaron ${committed} facturas exitosamente en Cloud Firestore!`);
         setShowCsvModal(false);
@@ -1639,14 +1828,38 @@ export default function App() {
               </div>
             </div>
 
-            {/* Logout button visible on mobile header */}
-            <button
-              onClick={handleLogout}
-              title="Cerrar sesión"
-              className="sm:hidden p-1.5 text-slate-400 hover:text-rose-400 rounded-lg hover:bg-slate-800"
-            >
-              <LogOut className="w-4 h-4" />
-            </button>
+            {/* Mobile Header Buttons (PWA Install + Notifications + Logout) */}
+            <div className="flex items-center gap-1.5 sm:hidden">
+              {deferredPrompt && (
+                <button
+                  onClick={handleInstallPwa}
+                  title="Instalar en Celular"
+                  className="px-2.5 py-1 bg-emerald-600/25 hover:bg-emerald-600/40 text-emerald-300 border border-emerald-500/40 rounded-xl text-xs font-bold transition-all flex items-center gap-1 shadow-sm cursor-pointer"
+                >
+                  <Smartphone className="w-3.5 h-3.5 text-emerald-400" />
+                  <span>Instalar</span>
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={handleToggleNotifications}
+                title="Avisos y Notificaciones"
+                className={`p-1.5 rounded-lg transition-colors ${
+                  notificationsActive
+                    ? 'text-emerald-400 hover:bg-emerald-950/40'
+                    : 'text-slate-400 hover:text-amber-400 hover:bg-slate-800'
+                }`}
+              >
+                <Bell className="w-4 h-4" />
+              </button>
+              <button
+                onClick={handleLogout}
+                title="Cerrar sesión"
+                className="p-1.5 text-slate-400 hover:text-rose-400 rounded-lg hover:bg-slate-800"
+              >
+                <LogOut className="w-4 h-4" />
+              </button>
+            </div>
           </div>
 
           {/* Action buttons with proper wrap, gap-2 and full labels */}
@@ -1704,6 +1917,22 @@ export default function App() {
             >
               <Download className="w-4 h-4 text-emerald-400" />
               <span>Excel</span>
+            </button>
+
+            {/* Avisos y Notificaciones Push / Service Worker */}
+            <button
+              id="toggleNotificationsBtn"
+              type="button"
+              onClick={handleToggleNotifications}
+              className={`px-3 py-2 rounded-xl text-xs font-semibold border transition-all flex items-center gap-1.5 shadow-sm cursor-pointer whitespace-nowrap shrink-0 ${
+                notificationsActive
+                  ? 'bg-emerald-950/80 hover:bg-emerald-900/80 text-emerald-300 border-emerald-500/60 ring-1 ring-emerald-500/20'
+                  : 'bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white border-slate-700 hover:border-amber-500/40'
+              }`}
+              title="Activar avisos de facturas por vencer y nuevas facturas"
+            >
+              <Bell className={`w-4 h-4 ${notificationsActive ? 'text-emerald-400' : 'text-amber-400'}`} />
+              <span>{notificationsActive ? 'Avisos Activos' : 'Avisos'}</span>
             </button>
 
             {/* Cerrar Sesión (Desktop) */}
@@ -3071,6 +3300,39 @@ export default function App() {
                 Cerrar
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* PWA Floating Install Banner for Mobile */}
+      {showPwaBanner && (
+        <div className="fixed bottom-4 left-3 right-3 sm:left-auto sm:right-5 sm:max-w-sm z-50 bg-slate-900/95 border border-emerald-500/50 rounded-2xl p-3.5 shadow-2xl backdrop-blur-md flex items-center justify-between gap-3 text-white transition-all transform duration-300">
+          <div className="flex items-center gap-2.5 min-w-0">
+            <div className="w-10 h-10 rounded-xl bg-emerald-950 border border-emerald-500/40 flex items-center justify-center text-emerald-400 shrink-0">
+              <Smartphone className="w-5 h-5" />
+            </div>
+            <div className="min-w-0">
+              <div className="text-xs font-bold text-white leading-tight">Control de Cobranza CFDI</div>
+              <div className="text-[11px] text-slate-400 truncate">App instalable para Android</div>
+            </div>
+          </div>
+          <div className="flex items-center gap-1.5 shrink-0">
+            <button
+              onClick={handleInstallPwa}
+              className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl text-xs transition-all shadow-md flex items-center gap-1 cursor-pointer whitespace-nowrap"
+            >
+              <span>📱 Instalar en Celular</span>
+            </button>
+            <button
+              onClick={() => {
+                sessionStorage.setItem('pwaPromptDismissed', 'true');
+                setShowPwaBanner(false);
+              }}
+              className="p-1.5 text-slate-400 hover:text-white rounded-lg hover:bg-slate-800 transition-colors cursor-pointer"
+              title="Cerrar aviso"
+            >
+              <X className="w-4 h-4" />
+            </button>
           </div>
         </div>
       )}
