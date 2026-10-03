@@ -226,6 +226,17 @@
               <span>📱 Instalar</span>
             </button>
 
+            <!-- Botón Recordatorios en Móvil -->
+            <button 
+              id="mobileRemindersBtn"
+              type="button"
+              class="p-2 text-slate-400 hover:text-amber-400 rounded-lg hover:bg-slate-800 transition-colors relative"
+              title="Recordatorios programados de cobro"
+            >
+              <i data-lucide="clock" class="w-4 h-4 text-amber-400"></i>
+              <span id="mobileRemindersDot" class="hidden absolute top-1 right-1 w-2 h-2 bg-amber-400 rounded-full ring-2 ring-slate-900"></span>
+            </button>
+
             <!-- Botón Notificaciones en Móvil -->
             <button 
               id="mobileNotificationBtn"
@@ -306,6 +317,18 @@
           >
             <i data-lucide="bell" id="notificationBtnIcon" class="w-4 h-4 text-amber-400"></i>
             <span id="notificationBtnText">Avisos</span>
+          </button>
+
+          <!-- Recordatorios de Pago Personalizados -->
+          <button 
+            id="openRemindersListBtn"
+            type="button"
+            class="px-3 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white rounded-xl text-xs font-semibold border border-slate-700 hover:border-amber-500/40 transition-all flex items-center gap-1.5 shadow-sm cursor-pointer whitespace-nowrap shrink-0 relative"
+            title="Ver y configurar recordatorios de pago personalizados"
+          >
+            <i data-lucide="clock" class="w-4 h-4 text-amber-400"></i>
+            <span>Recordatorios</span>
+            <span id="remindersCountBadge" class="hidden px-1.5 py-0.2 bg-amber-500/20 text-amber-300 border border-amber-500/50 rounded-full text-[10px] font-bold">0</span>
           </button>
 
           <!-- Cerrar Sesión (Desktop) -->
@@ -2109,15 +2132,41 @@
 
             <!-- 10. ACCIÓN -->
             <td class="py-2.5 px-3 text-center whitespace-nowrap">
-              <button 
-                type="button"
-                onclick="window.deleteInvoice('${inv.id}', '${inv.numero_factura.replace(/'/g, "\\'")}')"
-                class="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-semibold text-rose-300 hover:text-white bg-rose-950/40 hover:bg-rose-600 border border-rose-800/60 hover:border-rose-500 transition-all cursor-pointer shadow-sm"
-                title="Eliminar factura ${inv.numero_factura} de Cloud Firestore"
-              >
-                <i data-lucide="trash-2" class="w-3.5 h-3.5 text-rose-400"></i>
-                <span>Eliminar</span>
-              </button>
+              <div class="flex items-center justify-center gap-1.5">
+                ${(() => {
+                  const activeRem = (window.reminders || []).find(r => r.invoiceId === inv.id && r.activo);
+                  const isSnoozed = activeRem && activeRem.pospuestoHasta && new Date(activeRem.pospuestoHasta).getTime() > Date.now();
+                  const btnClass = activeRem
+                    ? isSnoozed
+                      ? 'text-cyan-300 bg-cyan-950/60 border-cyan-500/60 hover:bg-cyan-900/60 ring-1 ring-cyan-500/30'
+                      : 'text-amber-300 bg-amber-950/60 border-amber-500/60 hover:bg-amber-900/60 ring-1 ring-amber-500/30'
+                    : 'text-slate-300 bg-slate-800 hover:bg-slate-700 border-slate-700 hover:border-amber-500/40';
+                  const iconColor = activeRem ? (isSnoozed ? 'text-cyan-400' : 'text-amber-400') : 'text-slate-400';
+                  const btnLabel = activeRem ? (isSnoozed ? 'Pospuesto' : 'Recordatorio') : 'Recordar';
+
+                  return `
+                    <button
+                      type="button"
+                      onclick="window.openReminderModal('${inv.id}')"
+                      class="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-semibold border transition-all cursor-pointer shadow-sm ${btnClass}"
+                      title="${activeRem ? (isSnoozed ? 'Aviso pospuesto' : 'Recordatorio activo') : 'Programar recordatorio de pago'}"
+                    >
+                      <i data-lucide="clock" class="w-3.5 h-3.5 ${iconColor}"></i>
+                      <span>${btnLabel}</span>
+                    </button>
+                  `;
+                })()}
+
+                <button 
+                  type="button"
+                  onclick="window.deleteInvoice('${inv.id}', '${inv.numero_factura.replace(/'/g, "\\'")}')"
+                  class="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-semibold text-rose-300 hover:text-white bg-rose-950/40 hover:bg-rose-600 border border-rose-800/60 hover:border-rose-500 transition-all cursor-pointer shadow-sm"
+                  title="Eliminar factura ${inv.numero_factura} de Cloud Firestore"
+                >
+                  <i data-lucide="trash-2" class="w-3.5 h-3.5 text-rose-400"></i>
+                  <span>Eliminar</span>
+                </button>
+              </div>
             </td>
           </tr>
         `;
@@ -3517,6 +3566,383 @@
     }
     updateNotificationUI();
 
+    // ==========================================
+    // 17. GESTOR DE RECORDATORIOS PERSONALIZADOS (STANDALONE)
+    // ==========================================
+    window.reminders = JSON.parse(localStorage.getItem('cfdi_payment_reminders') || '[]');
+
+    function saveRemindersToStorage() {
+      localStorage.setItem('cfdi_payment_reminders', JSON.stringify(window.reminders));
+      updateRemindersBadge();
+      if (typeof renderTable === 'function') renderTable();
+    }
+
+    function updateRemindersBadge() {
+      const activeCount = (window.reminders || []).filter(r => r.activo).length;
+      const badge = document.getElementById('remindersCountBadge');
+      const dot = document.getElementById('mobileRemindersDot');
+      if (badge) {
+        if (activeCount > 0) {
+          badge.textContent = activeCount;
+          badge.classList.remove('hidden');
+        } else {
+          badge.classList.add('hidden');
+        }
+      }
+      if (dot) {
+        if (activeCount > 0) {
+          dot.classList.remove('hidden');
+        } else {
+          dot.classList.add('hidden');
+        }
+      }
+    }
+
+    let activeReminderInvoice = null;
+
+    function calculateDefaultDate(fechaPago, regla) {
+      if (!fechaPago) {
+        const today = new Date();
+        today.setHours(9, 0, 0, 0);
+        return today.toISOString().slice(0, 16);
+      }
+      const [y, m, d] = fechaPago.split('-').map(Number);
+      const target = new Date(y, m - 1, d, 9, 0, 0, 0);
+      if (regla === '1_dia_antes') target.setDate(target.getDate() - 1);
+      if (regla === '3_dias_antes') target.setDate(target.getDate() - 3);
+      const yStr = target.getFullYear();
+      const mStr = String(target.getMonth() + 1).padStart(2, '0');
+      const dStr = String(target.getDate()).padStart(2, '0');
+      return `${yStr}-${mStr}-${dStr}T09:00`;
+    }
+
+    function toggleCustomDateTimeVisibility() {
+      const regla = document.getElementById('remRuleSelect')?.value;
+      const customContainer = document.getElementById('remCustomDateTimeContainer');
+      if (!customContainer) return;
+      if (regla === 'personalizado') {
+        customContainer.classList.remove('hidden');
+      } else {
+        customContainer.classList.add('hidden');
+      }
+    }
+
+    window.openReminderModal = function(invoiceId) {
+      const inv = invoices.find(i => i.id === invoiceId);
+      if (!inv) return;
+      activeReminderInvoice = inv;
+
+      document.getElementById('remInvoiceFolio').textContent = 'Factura ' + inv.numero_factura;
+      document.getElementById('remInvoiceMonto').textContent = '$' + Number(inv.monto_total).toLocaleString('es-MX', { minimumFractionDigits: 2 }) + ' MXN';
+      document.getElementById('remInvoiceEmpresa').textContent = inv.empresa;
+      document.getElementById('remInvoiceFecha').textContent = inv.fecha_probable_pago || 'Sin fecha definida';
+
+      const existing = (window.reminders || []).find(r => r.invoiceId === inv.id && r.activo);
+      const activeBanner = document.getElementById('remActiveBanner');
+      const deleteBtn = document.getElementById('remDeleteBtn');
+
+      if (existing) {
+        activeBanner.classList.remove('hidden');
+        deleteBtn.classList.remove('hidden');
+        const isSnoozed = existing.pospuestoHasta && new Date(existing.pospuestoHasta).getTime() > Date.now();
+        document.getElementById('remActiveStatusText').textContent = isSnoozed ? 'Recordatorio Actualmente Pospuesto' : 'Recordatorio Activo';
+        document.getElementById('remActiveNextDate').textContent = new Date(existing.pospuestoHasta || existing.fechaAviso).toLocaleString();
+        document.getElementById('remNotesInput').value = existing.notas || '';
+        document.getElementById('remRuleSelect').value = existing.regla || '1_dia_antes';
+        document.getElementById('remCustomDateTimeInput').value = existing.fechaAviso || '';
+      } else {
+        activeBanner.classList.add('hidden');
+        deleteBtn.classList.add('hidden');
+        document.getElementById('remNotesInput').value = '';
+        document.getElementById('remRuleSelect').value = '1_dia_antes';
+        document.getElementById('remCustomDateTimeInput').value = calculateDefaultDate(inv.fecha_probable_pago, '1_dia_antes');
+      }
+
+      toggleCustomDateTimeVisibility();
+      document.getElementById('reminderConfigModal').classList.remove('hidden');
+      if (window.lucide) lucide.createIcons();
+    };
+
+    document.getElementById('remRuleSelect')?.addEventListener('change', (e) => {
+      toggleCustomDateTimeVisibility();
+      if (e.target.value !== 'personalizado' && activeReminderInvoice) {
+        document.getElementById('remCustomDateTimeInput').value = calculateDefaultDate(activeReminderInvoice.fecha_probable_pago, e.target.value);
+      }
+    });
+
+    window.closeReminderModal = function() {
+      document.getElementById('reminderConfigModal').classList.add('hidden');
+      activeReminderInvoice = null;
+    };
+
+    window.saveReminderFromModal = function() {
+      if (!activeReminderInvoice) return;
+      const inv = activeReminderInvoice;
+      const regla = document.getElementById('remRuleSelect').value;
+      const customDt = document.getElementById('remCustomDateTimeInput').value;
+      const notes = document.getElementById('remNotesInput').value.trim();
+
+      const finalFechaAviso = regla === 'personalizado' ? customDt : calculateDefaultDate(inv.fecha_probable_pago, regla);
+
+      const existingIndex = (window.reminders || []).findIndex(r => r.invoiceId === inv.id);
+      const newRem = {
+        id: existingIndex >= 0 ? window.reminders[existingIndex].id : 'rem_' + Date.now(),
+        invoiceId: inv.id,
+        folio: inv.numero_factura,
+        empresa: inv.empresa,
+        monto: inv.monto_total,
+        fechaPago: inv.fecha_probable_pago || toLocalDateString(new Date()),
+        fechaAviso: finalFechaAviso,
+        regla: regla,
+        notas: notes,
+        activo: true,
+        pospuestoHasta: null,
+        ultimoDisparo: null,
+        createdAt: new Date().toISOString()
+      };
+
+      if (existingIndex >= 0) {
+        window.reminders[existingIndex] = newRem;
+      } else {
+        window.reminders.push(newRem);
+      }
+
+      saveRemindersToStorage();
+      window.closeReminderModal();
+
+      if (Notification.permission !== 'granted') {
+        Notification.requestPermission().then(perm => {
+          if (perm === 'granted') updateNotificationUI();
+        });
+      }
+
+      alert(`¡Recordatorio programado para la factura ${inv.numero_factura}!\nAviso: ${new Date(finalFechaAviso).toLocaleString()}`);
+    };
+
+    window.deleteReminderFromModal = function() {
+      if (!activeReminderInvoice) return;
+      window.reminders = (window.reminders || []).filter(r => r.invoiceId !== activeReminderInvoice.id);
+      saveRemindersToStorage();
+      window.closeReminderModal();
+    };
+
+    window.snoozeCurrentReminder = function(hours) {
+      if (!activeReminderInvoice) return;
+      const rem = (window.reminders || []).find(r => r.invoiceId === activeReminderInvoice.id);
+      if (!rem) return;
+      window.snoozeReminder(rem.id, hours);
+      window.closeReminderModal();
+    };
+
+    window.snoozeReminder = function(reminderId, hours) {
+      const snoozeDate = new Date();
+      snoozeDate.setHours(snoozeDate.getHours() + hours);
+      const snoozeIso = snoozeDate.toISOString();
+
+      window.reminders = (window.reminders || []).map(r => {
+        if (r.id === reminderId) {
+          return { ...r, pospuestoHasta: snoozeIso, activo: true };
+        }
+        return r;
+      });
+
+      saveRemindersToStorage();
+      const label = hours === 1 ? '1 hora' : hours === 24 ? '24 horas' : `${hours / 24} días`;
+      alert(`Recordatorio pospuesto por ${label}.\nSe reactivará: ${snoozeDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} del ${snoozeDate.toLocaleDateString()}.`);
+    };
+
+    window.testReminder = function(reminderId) {
+      const rem = (window.reminders || []).find(r => r.id === reminderId);
+      if (!rem) return;
+      const fmt = '$' + Number(rem.monto).toLocaleString('es-MX', { minimumFractionDigits: 2 }) + ' MXN';
+      notifyViaServiceWorker(
+        `🔔 Recordatorio de Pago: Factura ${rem.folio}`,
+        `${rem.empresa} • ${fmt}\nFecha programada: ${rem.fechaPago}${rem.notas ? `\nNota: ${rem.notas}` : ''}`,
+        'test-rem-' + rem.id + '-' + Date.now(),
+        './',
+        {
+          isPaymentReminder: true,
+          reminderId: rem.id,
+          invoiceId: rem.invoiceId,
+          folio: rem.folio,
+          empresa: rem.empresa,
+          monto: fmt,
+          notas: rem.notas
+        }
+      );
+    };
+
+    window.deleteReminderById = function(reminderId) {
+      window.reminders = (window.reminders || []).filter(r => r.id !== reminderId);
+      saveRemindersToStorage();
+      window.renderRemindersList();
+    };
+
+    window.openRemindersListModal = function() {
+      window.renderRemindersList();
+      document.getElementById('remindersListModal').classList.remove('hidden');
+      if (window.lucide) lucide.createIcons();
+    };
+
+    window.closeRemindersListModal = function() {
+      document.getElementById('remindersListModal').classList.add('hidden');
+    };
+
+    window.renderRemindersList = function() {
+      const container = document.getElementById('remindersListContainer');
+      if (!container) return;
+
+      if (!window.reminders || window.reminders.length === 0) {
+        container.innerHTML = `
+          <div class="text-center py-10 space-y-2 text-slate-400">
+            <i data-lucide="clock" class="w-10 h-10 mx-auto text-slate-600 stroke-[1.5]"></i>
+            <p class="text-sm font-semibold text-slate-300">No hay recordatorios de pago programados</p>
+            <p class="text-xs text-slate-500 max-w-sm mx-auto">
+              Puedes programar recordatorios push con opción de posponer haciendo clic en el botón "Recordar" en cualquier fila de la tabla de cobranza.
+            </p>
+          </div>
+        `;
+        return;
+      }
+
+      container.innerHTML = window.reminders.map(rem => {
+        const isSnoozed = rem.pospuestoHasta && new Date(rem.pospuestoHasta).getTime() > Date.now();
+        const targetTime = rem.pospuestoHasta || rem.fechaAviso;
+        const fmt = '$' + Number(rem.monto).toLocaleString('es-MX', { minimumFractionDigits: 2 }) + ' MXN';
+
+        return `
+          <div class="p-4 rounded-2xl border transition-all flex flex-col sm:flex-row sm:items-center justify-between gap-3 ${
+            isSnoozed ? 'bg-cyan-950/30 border-cyan-500/40' : 'bg-slate-950/60 border-slate-800'
+          }">
+            <div class="space-y-1 min-w-0">
+              <div class="flex items-center gap-2">
+                <span class="font-mono font-bold text-sm text-cyan-400">Factura ${rem.folio}</span>
+                <span class="font-bold text-xs text-emerald-400 font-mono">${fmt}</span>
+                ${isSnoozed ? `
+                  <span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-cyan-500/20 text-cyan-300 border border-cyan-500/30">
+                    Pospuesto
+                  </span>
+                ` : `
+                  <span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                    Activo
+                  </span>
+                `}
+              </div>
+              <div class="text-xs font-semibold text-white truncate">${rem.empresa}</div>
+              <div class="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-slate-400">
+                <span>Fecha cobro: <strong class="text-slate-300">${rem.fechaPago}</strong></span>
+                <span>•</span>
+                <span>Próximo aviso: <strong class="${isSnoozed ? 'text-cyan-300' : 'text-amber-300'}">${new Date(targetTime).toLocaleString()}</strong></span>
+              </div>
+              ${rem.notas ? `<div class="text-[11px] text-slate-400 italic bg-slate-900/80 px-2 py-1 rounded-lg border border-slate-800 max-w-md">Nota: ${rem.notas}</div>` : ''}
+            </div>
+
+            <div class="flex flex-wrap items-center gap-1.5 shrink-0 pt-2 sm:pt-0 border-t sm:border-t-0 border-slate-800">
+              <button
+                type="button"
+                onclick="window.snoozeReminder('${rem.id}', 1)"
+                class="px-2 py-1 bg-slate-800 hover:bg-slate-700 text-cyan-300 border border-slate-700 hover:border-cyan-500/50 rounded-lg text-[11px] font-semibold transition-all cursor-pointer"
+                title="Posponer 1 hora"
+              >
+                +1h
+              </button>
+              <button
+                type="button"
+                onclick="window.snoozeReminder('${rem.id}', 24)"
+                class="px-2 py-1 bg-slate-800 hover:bg-slate-700 text-cyan-300 border border-slate-700 hover:border-cyan-500/50 rounded-lg text-[11px] font-semibold transition-all cursor-pointer"
+                title="Posponer 24 horas"
+              >
+                +24h
+              </button>
+              <button
+                type="button"
+                onclick="window.testReminder('${rem.id}')"
+                class="px-2.5 py-1 bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 rounded-lg text-[11px] font-semibold transition-all cursor-pointer"
+                title="Probar notificación ahora"
+              >
+                Probar
+              </button>
+              <button
+                type="button"
+                onclick="window.deleteReminderById('${rem.id}')"
+                class="p-1 text-slate-500 hover:text-rose-400 rounded-lg hover:bg-slate-800 transition-colors cursor-pointer"
+                title="Eliminar recordatorio"
+              >
+                <i data-lucide="trash-2" class="w-4 h-4"></i>
+              </button>
+            </div>
+          </div>
+        `;
+      }).join('');
+      if (window.lucide) lucide.createIcons();
+    };
+
+    // Escuchar mensajes de Posponer emitidos por el Service Worker
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.addEventListener('message', (event) => {
+        const { type, reminderId, invoiceId, hours } = event.data || {};
+        if (type === 'REMINDER_SNOOZED') {
+          const snoozeDate = new Date();
+          snoozeDate.setHours(snoozeDate.getHours() + (hours || 24));
+          const snoozeIso = snoozeDate.toISOString();
+
+          window.reminders = (window.reminders || []).map(r => {
+            if ((reminderId && r.id === reminderId) || (invoiceId && r.invoiceId === invoiceId)) {
+              return { ...r, pospuestoHasta: snoozeIso, activo: true };
+            }
+            return r;
+          });
+          saveRemindersToStorage();
+        }
+      });
+    }
+
+    // Intervalo de chequeo de recordatorios
+    setInterval(() => {
+      if (!('Notification' in window) || Notification.permission !== 'granted') return;
+      const nowMs = Date.now();
+      let updated = false;
+
+      (window.reminders || []).forEach(rem => {
+        if (!rem.activo) return;
+        const targetMs = rem.pospuestoHasta ? new Date(rem.pospuestoHasta).getTime() : new Date(rem.fechaAviso).getTime();
+        if (nowMs >= targetMs) {
+          if (rem.ultimoDisparo) {
+            const lastMs = new Date(rem.ultimoDisparo).getTime();
+            if (!rem.pospuestoHasta && (nowMs - lastMs < 4 * 60 * 60 * 1000)) return;
+          }
+
+          const fmt = '$' + Number(rem.monto).toLocaleString('es-MX', { minimumFractionDigits: 2 }) + ' MXN';
+          notifyViaServiceWorker(
+            `🔔 Recordatorio de Pago: Factura ${rem.folio}`,
+            `${rem.empresa} • ${fmt}\nFecha de pago: ${rem.fechaPago}${rem.notas ? `\nNota: ${rem.notas}` : ''}`,
+            'rem-' + rem.id,
+            './',
+            {
+              isPaymentReminder: true,
+              reminderId: rem.id,
+              invoiceId: rem.invoiceId,
+              folio: rem.folio,
+              empresa: rem.empresa,
+              monto: fmt,
+              notas: rem.notas
+            }
+          );
+
+          rem.ultimoDisparo = new Date().toISOString();
+          rem.pospuestoHasta = null;
+          updated = true;
+        }
+      });
+
+      if (updated) saveRemindersToStorage();
+    }, 60000);
+
+    // Eventos para abrir modal de recordatorios
+    document.getElementById('openRemindersListBtn')?.addEventListener('click', window.openRemindersListModal);
+    document.getElementById('mobileRemindersBtn')?.addEventListener('click', window.openRemindersListModal);
+    updateRemindersBadge();
+
     // C. Manejo de beforeinstallprompt y Botón/Banner de instalación en Celulares
     let deferredPwaPrompt = null;
     const pwaInstallBanner = document.getElementById('pwaInstallBanner');
@@ -3590,6 +4016,210 @@
       console.log('¡Aplicación Control de Cobranza CFDI instalada con éxito!');
     });
   </script>
+
+  <!-- ==================== MODAL: CONFIGURAR RECORDATORIO DE PAGO ==================== -->
+  <div 
+    id="reminderConfigModal" 
+    class="hidden fixed inset-0 z-50 flex items-center justify-center bg-slate-950/85 backdrop-blur-md p-3 sm:p-5 overflow-y-auto"
+  >
+    <div class="bg-slate-900 border border-slate-800 rounded-3xl max-w-lg w-full p-5 sm:p-6 shadow-2xl space-y-4 my-auto">
+      
+      <!-- Header -->
+      <div class="flex items-center justify-between pb-3 border-b border-slate-800">
+        <div class="flex items-center gap-3">
+          <div class="w-10 h-10 bg-amber-950 border border-amber-500/40 rounded-xl flex items-center justify-center text-amber-400 shrink-0">
+            <i data-lucide="clock" class="w-5 h-5"></i>
+          </div>
+          <div>
+            <h3 class="text-base font-bold text-white">Recordatorio de Cobro</h3>
+            <p class="text-xs text-slate-400">Configuración de aviso push personalizado para fecha de pago</p>
+          </div>
+        </div>
+        <button 
+          onclick="window.closeReminderModal()" 
+          class="text-slate-400 hover:text-white p-2 rounded-xl hover:bg-slate-800 transition-colors cursor-pointer"
+        >
+          <i data-lucide="x" class="w-5 h-5"></i>
+        </button>
+      </div>
+
+      <!-- Invoice Info Card -->
+      <div class="bg-slate-950/80 border border-slate-800/80 rounded-2xl p-3.5 space-y-1.5 text-xs">
+        <div class="flex items-center justify-between">
+          <span id="remInvoiceFolio" class="font-mono font-bold text-cyan-400 text-sm">Factura</span>
+          <span id="remInvoiceMonto" class="font-mono font-bold text-emerald-400 text-sm">$0.00 MXN</span>
+        </div>
+        <div id="remInvoiceEmpresa" class="text-slate-200 font-semibold truncate">Cliente</div>
+        <div class="flex items-center gap-2 text-slate-400 text-[11px] pt-1 border-t border-slate-800/60">
+          <span>Fecha de cobro registrada:</span>
+          <span id="remInvoiceFecha" class="font-bold text-amber-300">-</span>
+        </div>
+      </div>
+
+      <!-- Banner de Recordatorio Activo (si ya existe) -->
+      <div id="remActiveBanner" class="hidden bg-amber-950/30 border border-amber-500/40 rounded-2xl p-3.5 space-y-3">
+        <div class="flex items-start justify-between gap-2">
+          <div>
+            <div id="remActiveStatusText" class="text-xs font-bold text-amber-300 flex items-center gap-1.5">
+              <span class="w-2 h-2 rounded-full bg-amber-400 animate-ping"></span>
+              Recordatorio Activo
+            </div>
+            <div class="text-[11px] text-slate-300 mt-1">
+              Próximo aviso programado: <strong id="remActiveNextDate" class="text-white">-</strong>
+            </div>
+          </div>
+          <button 
+            type="button" 
+            onclick="window.testReminder(activeReminderInvoice?.id)"
+            class="px-2.5 py-1 bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 rounded-lg text-[11px] font-semibold transition-all shrink-0 cursor-pointer"
+          >
+            Probar aviso
+          </button>
+        </div>
+
+        <!-- Acciones de Posponer (Snooze) -->
+        <div class="space-y-1.5 pt-2 border-t border-amber-500/20">
+          <span class="text-[11px] text-amber-200/80 font-semibold">Posponer recordatorio para más tarde:</span>
+          <div class="grid grid-cols-3 gap-2">
+            <button 
+              type="button" 
+              onclick="window.snoozeCurrentReminder(1)"
+              class="py-1.5 px-2 bg-slate-900/90 hover:bg-cyan-950/80 text-cyan-300 border border-slate-700 hover:border-cyan-500/60 rounded-xl text-[11px] font-semibold transition-all flex items-center justify-center gap-1 cursor-pointer"
+            >
+              <i data-lucide="clock" class="w-3 h-3 text-cyan-400"></i>
+              <span>+1 Hora</span>
+            </button>
+            <button 
+              type="button" 
+              onclick="window.snoozeCurrentReminder(24)"
+              class="py-1.5 px-2 bg-slate-900/90 hover:bg-cyan-950/80 text-cyan-300 border border-slate-700 hover:border-cyan-500/60 rounded-xl text-[11px] font-semibold transition-all flex items-center justify-center gap-1 cursor-pointer"
+            >
+              <i data-lucide="clock" class="w-3 h-3 text-cyan-400"></i>
+              <span>+24 Horas</span>
+            </button>
+            <button 
+              type="button" 
+              onclick="window.snoozeCurrentReminder(72)"
+              class="py-1.5 px-2 bg-slate-900/90 hover:bg-cyan-950/80 text-cyan-300 border border-slate-700 hover:border-cyan-500/60 rounded-xl text-[11px] font-semibold transition-all flex items-center justify-center gap-1 cursor-pointer"
+            >
+              <i data-lucide="clock" class="w-3 h-3 text-cyan-400"></i>
+              <span>+3 Días</span>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Configuración de Regla -->
+      <div class="space-y-3 pt-1">
+        <label class="block text-xs font-bold text-slate-300">¿Cuándo deseas recibir el recordatorio?</label>
+        
+        <select 
+          id="remRuleSelect"
+          class="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-amber-500"
+        >
+          <option value="1_dia_antes">⏰ 1 día antes a las 09:00 AM (Recomendado)</option>
+          <option value="mismo_dia">📌 El mismo día de pago a las 09:00 AM</option>
+          <option value="3_dias_antes">📅 3 días antes a las 09:00 AM</option>
+          <option value="personalizado">⚙️ Personalizado (Elegir fecha y hora)</option>
+        </select>
+
+        <div id="remCustomDateTimeContainer" class="hidden space-y-1.5 pt-1">
+          <label class="text-[11px] font-semibold text-slate-400">Fecha y hora exacta del recordatorio:</label>
+          <input 
+            type="datetime-local" 
+            id="remCustomDateTimeInput"
+            class="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-amber-500"
+          />
+        </div>
+
+        <div class="space-y-1.5">
+          <label class="text-[11px] font-semibold text-slate-400">Instrucciones o notas adicionales (opcional):</label>
+          <input 
+            type="text" 
+            id="remNotesInput"
+            placeholder="Ej. Llamar a tesorería, verificar contra-recibo..." 
+            class="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white placeholder-slate-600 focus:outline-none focus:border-amber-500"
+          />
+        </div>
+      </div>
+
+      <!-- Footer Buttons -->
+      <div class="pt-3 border-t border-slate-800 flex items-center justify-between gap-2">
+        <button 
+          id="remDeleteBtn" 
+          type="button" 
+          onclick="window.deleteReminderFromModal()"
+          class="hidden px-3 py-2 bg-rose-950/40 hover:bg-rose-900/60 text-rose-300 border border-rose-800/60 rounded-xl text-xs font-semibold transition-all flex items-center gap-1 cursor-pointer"
+        >
+          <i data-lucide="trash-2" class="w-3.5 h-3.5 text-rose-400"></i>
+          <span>Eliminar</span>
+        </button>
+
+        <div class="flex items-center gap-2 ml-auto">
+          <button 
+            type="button" 
+            onclick="window.closeReminderModal()"
+            class="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-semibold cursor-pointer"
+          >
+            Cancelar
+          </button>
+          <button 
+            type="button" 
+            onclick="window.saveReminderFromModal()"
+            class="px-4 py-2 bg-amber-600 hover:bg-amber-500 text-slate-950 font-bold rounded-xl text-xs transition-all shadow-md shadow-amber-950/50 flex items-center gap-1.5 cursor-pointer"
+          >
+            <i data-lucide="check" class="w-4 h-4"></i>
+            <span>Guardar Recordatorio</span>
+          </button>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- ==================== MODAL: GESTOR DE TODOS LOS RECORDATORIOS ==================== -->
+  <div 
+    id="remindersListModal" 
+    class="hidden fixed inset-0 z-50 flex items-center justify-center bg-slate-950/85 backdrop-blur-md p-3 sm:p-5 overflow-y-auto"
+  >
+    <div class="bg-slate-900 border border-slate-800 rounded-3xl max-w-3xl w-full p-5 sm:p-6 shadow-2xl space-y-4 my-auto max-h-[92vh] flex flex-col">
+      
+      <!-- Header -->
+      <div class="flex items-center justify-between pb-3 border-b border-slate-800 shrink-0">
+        <div class="flex items-center gap-3">
+          <div class="w-10 h-10 bg-amber-950 border border-amber-500/40 rounded-xl flex items-center justify-center text-amber-400 shrink-0">
+            <i data-lucide="clock" class="w-5 h-5"></i>
+          </div>
+          <div>
+            <h3 class="text-base font-bold text-white">Recordatorios de Cobro Programados</h3>
+            <p class="text-xs text-slate-400">Gestión de alertas push y posposiciones para fechas de pago</p>
+          </div>
+        </div>
+        <button 
+          onclick="window.closeRemindersListModal()" 
+          class="text-slate-400 hover:text-white p-2 rounded-xl hover:bg-slate-800 transition-colors cursor-pointer"
+        >
+          <i data-lucide="x" class="w-5 h-5"></i>
+        </button>
+      </div>
+
+      <!-- List -->
+      <div id="remindersListContainer" class="overflow-y-auto space-y-3 flex-1 pr-1"></div>
+
+      <!-- Footer -->
+      <div class="pt-3 border-t border-slate-800 flex items-center justify-between text-xs text-slate-400 shrink-0">
+        <span>Los recordatorios se evalúan automáticamente usando el Service Worker de la PWA.</span>
+        <button 
+          type="button" 
+          onclick="window.closeRemindersListModal()"
+          class="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl font-semibold cursor-pointer"
+        >
+          Cerrar
+        </button>
+      </div>
+
+    </div>
+  </div>
 
   <!-- ==================== BANNER FLOTANTE DE INSTALACIÓN PWA (MÓVIL / ANDROID) ==================== -->
   <div 
