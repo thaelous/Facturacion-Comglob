@@ -17,6 +17,7 @@ import {
   CheckCircle2, 
   AlertCircle, 
   FileUp, 
+  FileText,
   Upload, 
   Table as TableIcon, 
   Search, 
@@ -477,6 +478,7 @@ export default function App() {
   const [csvStatusText, setCsvStatusText] = useState('');
   const csvInputRef = useRef<HTMLInputElement>(null);
   const xmlInputRef = useRef<HTMLInputElement>(null);
+  const pdfInputRef = useRef<HTMLInputElement>(null);
 
   // 1. Firebase Anonymous Auth
   useEffect(() => {
@@ -1566,6 +1568,548 @@ export default function App() {
     }
   };
 
+  // Descargar archivo standalone.html renombrado a index.html listo para Netlify
+  const handleDownloadStandalone = async () => {
+    try {
+      const response = await fetch('/standalone.html');
+      if (!response.ok) throw new Error('No se pudo obtener standalone.html');
+      const htmlText = await response.text();
+      const blob = new Blob([htmlText], { type: 'text/html;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = 'index.html';
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      console.warn('Error en descarga directa de standalone.html:', err);
+      window.open('/standalone.html', '_blank');
+    }
+  };
+
+  // Procesamiento y extracción inteligente de comprobantes PDF (Facturas y Complementos REP)
+  const handlePdfUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    try {
+      const arrayBuffer = await file.arrayBuffer();
+      const pdfjs = (window as any).pdfjsLib;
+      if (!pdfjs) {
+        alert('La librería PDF.js se está inicializando o no está disponible en este momento. Por favor verifica tu conexión.');
+        return;
+      }
+      if (!pdfjs.GlobalWorkerOptions.workerSrc) {
+        pdfjs.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+      }
+
+      const pdf = await pdfjs.getDocument({ data: arrayBuffer }).promise;
+      const allLines: string[] = [];
+
+      for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
+        const page = await pdf.getPage(pageNum);
+        const textContent = await page.getTextContent();
+        const items = textContent.items as Array<{ str: string; transform: number[] }>;
+
+        const mapped = items
+          .filter(it => it.str && it.str.trim().length > 0)
+          .map(it => ({
+            str: it.str,
+            x: it.transform ? it.transform[4] : 0,
+            y: it.transform ? it.transform[5] : 0
+          }));
+
+        // Ordenar de arriba a abajo (Y descendente) y de izquierda a derecha (X ascendente)
+        mapped.sort((a, b) => {
+          const yDiff = b.y - a.y;
+          if (Math.abs(yDiff) > 3) return yDiff;
+          return a.x - b.x;
+        });
+
+        let currentLine: string[] = [];
+        let currentY: number | null = null;
+
+        for (const it of mapped) {
+          if (currentY === null || Math.abs(it.y - currentY) > 4) {
+            if (currentLine.length > 0) {
+              allLines.push(currentLine.join(' '));
+            }
+            currentLine = [it.str];
+            currentY = it.y;
+          } else {
+            currentLine.push(it.str);
+          }
+        }
+        if (currentLine.length > 0) {
+          allLines.push(currentLine.join(' '));
+        }
+      }
+
+      const fullText = allLines.join('\n');
+
+      // 1. Detección de si es un Complemento de Pago (REP)
+      const isComplement = /(?:complemento\s+de\s+pagos?|recibo\s+electr[oó]nico\s+de\s+pago|tipo\s+de\s+comprobante\s*[:\s]*p\b)/i.test(fullText);
+
+      let rawFolio = '';
+      let nombreReceptor = '';
+      let rfcReceptor = '';
+      let ordenDeCompra = '';
+      let descripcion = '';
+      let valorUnitario = 0;
+      let montoTotal = 0;
+      let fecha = '';
+      let estatus: InvoiceStatus = 'Generado';
+      let docRelacionadoSummary = '';
+      const relatedFolios: string[] = [];
+
+      if (isComplement) {
+        // =========================================================================
+        // REGLAS ESTRICTAS PARA COMPLEMENTO DE PAGOS ($0.00)
+        // =========================================================================
+
+        // 1. FOLIO: El número inmediatamente después de la etiqueta 'Complemento de Pagos' (ej: 3231)
+        const compFolioMatch = fullText.match(/(?:complemento\s+de\s+pagos?|COMPLEMENTO\s+DE\s+PAGOS?)\s*[:#\-\s]*([0-9]+|[A-Za-z0-9_\-]+)/i);
+        if (compFolioMatch && compFolioMatch[1]) {
+          const candidate = compFolioMatch[1].trim();
+          if (!/^(de|del|sat|cfdi|dr|fecha|cliente|rfc|serie|folio|tipo)$/i.test(candidate)) {
+            rawFolio = candidate;
+          }
+        }
+        if (!rawFolio) {
+          for (let i = 0; i < allLines.length; i++) {
+            const line = allLines[i].trim();
+            if (/(?:complemento\s+de\s+pagos?|COMPLEMENTO\s+DE\s+PAGOS?)/i.test(line)) {
+              const after = line.replace(/.*(?:complemento\s+de\s+pagos?|COMPLEMENTO\s+DE\s+PAGOS?)\s*[:#\-\s]*/i, '').trim();
+              const numInLine = after.match(/^([A-Za-z0-9_\-]+)/);
+              if (numInLine && numInLine[1] && !/^(de|del|sat|cfdi|dr|fecha|cliente|rfc)$/i.test(numInLine[1])) {
+                rawFolio = numInLine[1].trim();
+                break;
+              }
+              for (let j = i + 1; j < Math.min(i + 4, allLines.length); j++) {
+                const nextL = allLines[j].trim();
+                if (!nextL) continue;
+                const matchNext = nextL.match(/^(?:folio\s*[:#\-]?\s*)?([0-9]+|[A-Za-z0-9_\-]+)$/i);
+                if (matchNext && matchNext[1] && !/^(de|del|sat|cfdi|dr|fecha|cliente|rfc)$/i.test(matchNext[1])) {
+                  rawFolio = matchNext[1].trim();
+                  break;
+                }
+              }
+              if (rawFolio) break;
+            }
+          }
+        }
+        if (!rawFolio) {
+          const folMatch = fullText.match(/(?:folio\s*[:#\-]?\s*|serie\s*[:\s]*[A-Za-z0-9\-]+\s*folio\s*[:#\-]?\s*)([A-Za-z0-9_\-]+)/i);
+          if (folMatch && folMatch[1] && !/^(fiscal|sat|cfdi|uuid)$/i.test(folMatch[1])) {
+            rawFolio = folMatch[1].trim();
+          }
+        }
+        if (!rawFolio) {
+          rawFolio = file.name.replace(/\.[^/.]+$/, '').replace(/\D/g, '') || `CP-${Date.now().toString().slice(-4)}`;
+        }
+
+        // 2. EMPRESA / RECEPTOR: El nombre o razón social que aparece justo debajo de la palabra 'CLIENTE' en el encabezado
+        for (let i = 0; i < allLines.length; i++) {
+          const line = allLines[i].trim();
+          if (/^(?:datos\s+del\s+)?cliente\b/i.test(line)) {
+            const sameLine = line.replace(/^(?:datos\s+del\s+)?cliente\s*[:\-#]?\s*/i, '').trim();
+            if (sameLine.length > 2 && !/^(rfc|domicilio|direcci[oó]n|uso|r[eé]gimen|c\.?p\.?|tel|correo|email)/i.test(sameLine)) {
+              nombreReceptor = sameLine;
+              break;
+            } else {
+              for (let j = i + 1; j < Math.min(i + 6, allLines.length); j++) {
+                const nextL = allLines[j].trim();
+                if (!nextL) continue;
+                if (/^(rfc|domicilio|direcci[oó]n|uso(\s+cfdi)?|c\.?p\.?|r[eé]gimen(\s+fiscal)?|tel[eé]fono|correo|email|m[eé]todo|forma|lugar)\b/i.test(nextL)) {
+                  break;
+                }
+                nombreReceptor = nextL;
+                break;
+              }
+            }
+            if (nombreReceptor) break;
+          }
+        }
+        if (!nombreReceptor) {
+          nombreReceptor = 'CLIENTE COMPLEMENTO';
+        }
+
+        // Buscar RFC
+        const rfcMatch = fullText.match(/\b([A-Z&Ñ]{3,4}\d{6}[A-V1-9][A-Z\d][0-9A])\b/i);
+        if (rfcMatch) rfcReceptor = rfcMatch[1].toUpperCase();
+
+        // 3. ORDEN DE COMPRA: Se deja completamente en blanco (no aplica para complementos)
+        ordenDeCompra = '';
+
+        // 4. CONCEPTO: 'Complemento de pago'
+        descripcion = 'Complemento de pago';
+
+        // 5. PRECIO UNITARIO Y MONTO TOTAL: En ceros ($0.00)
+        valorUnitario = 0;
+        montoTotal = 0;
+
+        // 6. FECHA: De 'Fecha y hora de emisión de CFDI'
+        const fechaMatch = fullText.match(/(?:fecha\s+y\s+hora\s+de\s+emisi[oó]n\s+(?:de\s+CFDI|del\s+CFDI|de\s+comprobante)?|fecha\s+de\s+emisi[oó]n)\s*[:\s]*([0-9]{4}-[0-9]{2}-[0-9]{2}(?:[T\s][0-9]{2}:[0-9]{2}(?::[0-9]{2})?)?|[0-9]{2}\/[0-9]{2}\/[0-9]{4}(?:[T\s][0-9]{2}:[0-9]{2}(?::[0-9]{2})?)?)/i);
+        if (fechaMatch && fechaMatch[1]) {
+          const rawF = fechaMatch[1].trim();
+          if (rawF.includes('/')) {
+            const parts = rawF.split(/[/\\sT]/);
+            fecha = `${parts[2]}-${parts[1].padStart(2, '0')}-${parts[0].padStart(2, '0')}`;
+          } else {
+            fecha = rawF.split(/[T\s]/)[0];
+          }
+        }
+        if (!fecha || !isValidDate(fecha)) {
+          for (let i = 0; i < allLines.length; i++) {
+            const line = allLines[i].trim();
+            if (/fecha\s+y\s+hora\s+de\s+emisi[oó]n/i.test(line)) {
+              const dM = line.match(/([0-9]{4}-[0-9]{2}-[0-9]{2}|[0-9]{2}\/[0-9]{2}\/[0-9]{4})/);
+              if (dM) {
+                const raw = dM[1];
+                if (raw.includes('/')) {
+                  const parts = raw.split('/');
+                  fecha = `${parts[2]}-${parts[1].padStart(2, '0')}-${parts[0].padStart(2, '0')}`;
+                } else {
+                  fecha = raw;
+                }
+                break;
+              }
+              if (i + 1 < allLines.length) {
+                const nextDM = allLines[i + 1].trim().match(/([0-9]{4}-[0-9]{2}-[0-9]{2}|[0-9]{2}\/[0-9]{2}\/[0-9]{4})/);
+                if (nextDM) {
+                  const raw = nextDM[1];
+                  if (raw.includes('/')) {
+                    const parts = raw.split('/');
+                    fecha = `${parts[2]}-${parts[1].padStart(2, '0')}-${parts[0].padStart(2, '0')}`;
+                  } else {
+                    fecha = raw;
+                  }
+                  break;
+                }
+              }
+            }
+          }
+        }
+        if (!fecha || !isValidDate(fecha)) {
+          const anyIsoDate = fullText.match(/\b(20[2-3]\d-[0-1]\d-[0-3]\d)\b/);
+          fecha = anyIsoDate ? anyIsoDate[1] : toLocalDateString(new Date());
+        }
+
+        // 7. ESTATUS: Asignado de forma automática y fija como 'Complemento'
+        estatus = 'Complemento';
+
+        // 8. NOTAS (Documentos Relacionados): Extraer folios de 'Documento relacionado 1', '2', etc.
+        const docRelRegex = /(?:documento\s+relacionado|docto\.?\s*relacionado)\s*(?:\d+|#\d+)?\b/gi;
+        const matches: Array<{ index: number; match: string }> = [];
+        let mDoc: RegExpExecArray | null;
+        while ((mDoc = docRelRegex.exec(fullText)) !== null) {
+          matches.push({ index: mDoc.index, match: mDoc[0] });
+        }
+
+        if (matches.length > 0) {
+          for (let i = 0; i < matches.length; i++) {
+            const startIndex = matches[i].index + matches[i].match.length;
+            const endIndex = (i + 1 < matches.length) ? matches[i + 1].index : fullText.length;
+            const block = fullText.slice(startIndex, endIndex);
+
+            const folMatch = block.match(/(?:folio\s*[:\s#\-]*|serie\s*[:\s]*[A-Za-z0-9\-]+\s*folio\s*[:\s#\-]*)([A-Za-z0-9_\-]+)/i);
+            if (folMatch && folMatch[1]) {
+              const val = folMatch[1].trim();
+              if (val && !relatedFolios.includes(val) && !/^(fiscal|cfdi|sat|uuid|de|del|dr|moneda|metodo)$/i.test(val)) {
+                relatedFolios.push(val);
+                continue;
+              }
+            }
+
+            const inlineMatch = block.match(/^\s*[:\-\#]?\s*([0-9]{2,10})\b/);
+            if (inlineMatch && inlineMatch[1]) {
+              const val = inlineMatch[1].trim();
+              if (!relatedFolios.includes(val)) {
+                relatedFolios.push(val);
+                continue;
+              }
+            }
+
+            const anyFol = block.match(/\b(?:folio)\s*[:\s#\-]*(\d+)\b/i);
+            if (anyFol && anyFol[1] && !relatedFolios.includes(anyFol[1].trim())) {
+              relatedFolios.push(anyFol[1].trim());
+            }
+          }
+        }
+
+        if (relatedFolios.length === 0) {
+          const lineRegex = /(?:documento\s+relacionado|docto\.?\s*relacionado)\s*(?:\d+|#\d+)?\s*[:\-#]?\s*([0-9]+|[A-Za-z0-9_\-]+)/gi;
+          let lm: RegExpExecArray | null;
+          while ((lm = lineRegex.exec(fullText)) !== null) {
+            const val = lm[1].trim();
+            if (val && !relatedFolios.includes(val) && !/^(fiscal|cfdi|sat|uuid|de|del)$/i.test(val)) {
+              relatedFolios.push(val);
+            }
+          }
+        }
+
+        docRelacionadoSummary = relatedFolios.join(', ');
+
+      } else {
+        // =========================================================================
+        // REGLAS PARA FACTURA NORMAL
+        // =========================================================================
+
+        // 1. DETECCIÓN AUTOMÁTICA DE ORDEN DE COMPRA (OC)
+        const stopWords = /^(de|del|sat|cfdi|dr|fecha|cliente|rfc|serie|folio|tipo|subtotal|total|iva|uuid|emision|receptor|emisor|moneda|metodo|pago|pue|ppd|mxn|usd|contado|credito)$/i;
+
+        // Escaneo regex en texto completo buscando "OC", "O.C.", "Orden de Compra", "P.O."
+        const ocRegex = /(?:orden\s+de\s+compra|orden\s+compra|\bo[\.\/\s]?c\.?|\bo\.c\.?|\bp[\.\/]?o\.?)\s*(?:#|n[oú]m(?:\.|ero)?|n°|no\.?)?\s*[:\-\#]?\s*([A-Za-z0-9_\-\/]{2,35})/gi;
+        let ocMatch: RegExpExecArray | null;
+        while ((ocMatch = ocRegex.exec(fullText)) !== null) {
+          if (ocMatch[1]) {
+            const candidate = ocMatch[1].trim().replace(/^[#:\-\s]+|[#:\-\s]+$/g, '');
+            if (candidate && !stopWords.test(candidate) && !/^(?:orden|compra|factura|folio)$/i.test(candidate)) {
+              ordenDeCompra = candidate;
+              break;
+            }
+          }
+        }
+
+        // Si no se encontró, escanear línea por línea para casos en tablas / encabezados
+        if (!ordenDeCompra) {
+          for (let i = 0; i < allLines.length; i++) {
+            const line = allLines[i].trim();
+            if (/(?:orden\s+de\s+compra|orden\s+compra|\bo[\.\/]?c\.?\b|\bo\.c\.?)/i.test(line)) {
+              const afterLabel = line.replace(/.*?(?:orden\s+de\s+compra|orden\s+compra|\bo[\.\/]?c\.?\b|\bo\.c\.?)\s*(?:#|n[oú]m(?:\.|ero)?|n°|no\.?)?\s*[:\-\#]?\s*/i, '').trim();
+              const candSame = afterLabel.match(/^([A-Za-z0-9_\-\/]{2,35})/);
+              if (candSame && candSame[1]) {
+                const c = candSame[1].replace(/^[#:\-\s]+|[#:\-\s]+$/g, '');
+                if (c && !stopWords.test(c)) {
+                  ordenDeCompra = c;
+                  break;
+                }
+              }
+
+              if (i + 1 < allLines.length) {
+                const nextL = allLines[i + 1].trim();
+                const candNext = nextL.match(/^([A-Za-z0-9_\-\/]{2,35})/);
+                if (candNext && candNext[1]) {
+                  const c = candNext[1].replace(/^[#:\-\s]+|[#:\-\s]+$/g, '');
+                  if (c && !stopWords.test(c) && !/^(rfc|fecha|total|subtotal|uuid|folio|cliente)/i.test(c)) {
+                    ordenDeCompra = c;
+                    break;
+                  }
+                }
+              }
+            }
+          }
+        }
+
+        // Folio normal
+        const folMatch = fullText.match(/(?:(?:folio|serie\s*[-A-Za-z0-9]+\s*folio)\s*[:#]?\s*([A-Za-z0-9_\-]+)|factura\s*(?:#|n[úu]m(?:\.|ero)?|no\.?|:)\s*([A-Za-z0-9_\-]+))/i);
+        if (folMatch) {
+          rawFolio = (folMatch[1] || folMatch[2] || '').trim();
+        }
+        if (!rawFolio) {
+          rawFolio = file.name.replace(/\.[^/.]+$/, '') || `F-${Date.now().toString().slice(-4)}`;
+        }
+
+        // Cliente
+        for (let i = 0; i < allLines.length; i++) {
+          const line = allLines[i].trim();
+          if (/^cliente\b/i.test(line)) {
+            const sameLine = line.replace(/^cliente\s*[:\-#]?\s*/i, '').trim();
+            if (sameLine.length > 2 && !/^(rfc|domicilio|uso|r[eé]gimen)/i.test(sameLine)) {
+              nombreReceptor = sameLine;
+            } else {
+              for (let j = i + 1; j < Math.min(i + 5, allLines.length); j++) {
+                const nextL = allLines[j].trim();
+                if (!nextL) continue;
+                if (/^(rfc|domicilio|direcci[oó]n|uso|c\.?p\.?|r[eé]gimen)/i.test(nextL)) break;
+                nombreReceptor = nextL;
+                break;
+              }
+            }
+            break;
+          }
+        }
+        if (!nombreReceptor) {
+          nombreReceptor = 'CLIENTE FACTURA';
+        }
+
+        // RFC
+        const rfcMatch = fullText.match(/\b([A-Z&Ñ]{3,4}\d{6}[A-V1-9][A-Z\d][0-9A])\b/i);
+        if (rfcMatch) rfcReceptor = rfcMatch[1].toUpperCase();
+
+        // Total
+        const totalMatch = fullText.match(/(?:total|monto\s+total|importe\s+total)\s*[:\$]?\s*\$?\s*([\d,]+\.?\d{0,2})/i);
+        if (totalMatch) {
+          montoTotal = parseFloat(totalMatch[1].replace(/,/g, '')) || 0;
+          valorUnitario = montoTotal;
+        }
+
+        // Concepto
+        const conceptoMatch = fullText.match(/(?:concepto|descripci[oó]n)\s*[:\-#]?\s*([^\n\r]+)/i);
+        descripcion = conceptoMatch ? conceptoMatch[1].trim() : 'Venta / Servicios';
+
+        // Fecha
+        const fechaMatch = fullText.match(/(?:fecha\s+y\s+hora\s+de\s+emisi[oó]n\s+(?:de\s+CFDI|del\s+CFDI)?|fecha\s+de\s+emisi[oó]n|fecha)\s*[:\s]*([0-9]{4}-[0-9]{2}-[0-9]{2}|[0-9]{2}\/[0-9]{2}\/[0-9]{4})/i);
+        if (fechaMatch) {
+          const rawF = fechaMatch[1];
+          if (rawF.includes('/')) {
+            const [d, m, y] = rawF.split('/');
+            fecha = `${y}-${m.padStart(2, '0')}-${d.padStart(2, '0')}`;
+          } else {
+            fecha = rawF;
+          }
+        }
+        if (!fecha || !isValidDate(fecha)) {
+          const anyIsoDate = fullText.match(/\b(20[2-3]\d-[0-1]\d-[0-3]\d)\b/);
+          fecha = anyIsoDate ? anyIsoDate[1] : toLocalDateString(new Date());
+        }
+
+        estatus = 'Generado';
+      }
+
+      // Cálculo de fecha probable de pago si el cliente está en el catálogo
+      let probableDate = '';
+      const clientMatch = clients.find(c => (
+        c.nombre.trim().toLowerCase() === nombreReceptor.trim().toLowerCase() || 
+        (rfcReceptor && c.rfc.trim().toUpperCase() === rfcReceptor.trim().toUpperCase())
+      ));
+
+      if (clientMatch && !isComplement) {
+        const emDate = new Date(fecha + 'T00:00:00');
+        emDate.setDate(emDate.getDate() + (clientMatch.dias_credito || 30));
+        if (clientMatch.dia_pago_fijo && clientMatch.dia_pago_fijo !== 'Mismo día exacto') {
+          const targetDay = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'].indexOf(clientMatch.dia_pago_fijo);
+          if (targetDay !== -1) {
+            const diff = (targetDay + 7 - emDate.getDay()) % 7;
+            emDate.setDate(emDate.getDate() + (diff === 0 ? 7 : diff));
+          }
+        }
+        probableDate = toLocalDateString(emDate);
+      }
+
+      // Notas para el complemento: recopilar y listar todos los folios encontrados en el campo de notas
+      let notasSummary = '';
+      if (isComplement) {
+        if (relatedFolios.length > 0) {
+          notasSummary = relatedFolios.join(', ');
+        }
+      }
+
+      // PREVENCIÓN DE DUPLICADOS Y HUECOS: Buscar coincidencia exacta o numérica
+      const existingInv = invoices.find(i => {
+        const normA = (i.numero_factura || '').trim().toLowerCase();
+        const normB = rawFolio.toLowerCase();
+        return normA === normB || (normA.replace(/\D/g, '') === normB.replace(/\D/g, '') && normB.replace(/\D/g, '').length > 0);
+      });
+
+      const targetDocId = existingInv ? existingInv.id : `inv_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
+
+      const payload: any = {
+        numero_factura: rawFolio,
+        empresa: nombreReceptor,
+        rfc_cliente: rfcReceptor,
+        orden_de_compra: isComplement ? '' : (ordenDeCompra || existingInv?.orden_de_compra || ''),
+        concepto: descripcion,
+        precio_unitario: valorUnitario,
+        monto_total: montoTotal,
+        fecha_emision: fecha,
+        fecha_probable_pago: existingInv?.fecha_probable_pago || probableDate,
+        estatus: estatus,
+        complemento: isComplement ? (notasSummary || existingInv?.complemento || '') : (existingInv?.complemento || ''),
+        documento_relacionado: docRelacionadoSummary,
+        es_hueco_pendiente: false,
+        updatedAt: new Date().toISOString()
+      };
+
+      if (!existingInv) {
+        payload.createdAt = new Date().toISOString();
+      }
+
+      await setDoc(doc(db, 'invoices', targetDocId), payload, { merge: true });
+
+      // Si es complemento, vincular y actualizar automáticamente facturas de ingreso relacionadas
+      let vinculadaCount = 0;
+      if (isComplement && relatedFolios.length > 0) {
+        let poolInvoices = [...invoices];
+        try {
+          const snap = await getDocs(collection(db, 'invoices'));
+          const firestoreItems: any[] = [];
+          snap.forEach(dSnap => firestoreItems.push({ id: dSnap.id, ...dSnap.data() }));
+          if (firestoreItems.length > 0) poolInvoices = firestoreItems;
+        } catch (errSnap) {
+          console.warn('Consulta directa a Firestore de respaldo:', errSnap);
+        }
+
+        for (const relFol of relatedFolios) {
+          const relDigits = relFol.replace(/\D/g, '').toLowerCase();
+
+          const originalInvoice = poolInvoices.find(inv => {
+            const m = typeof inv.monto_total === 'number' ? inv.monto_total : (parseFloat(inv.monto_total) || 0);
+            if (m <= 0) return false;
+            const invFolio = (inv.numero_factura || '').trim().toLowerCase();
+            const invDigits = invFolio.replace(/\D/g, '');
+            if (invFolio === relFol.toLowerCase()) return true;
+            if (relDigits && invDigits && relDigits === invDigits && relDigits.length >= 1) return true;
+            return false;
+          });
+
+          if (originalInvoice) {
+            const folioCompRef = rawFolio || 'S/N';
+            const notaActualizada = `Complemento ${folioCompRef}`;
+
+            await updateDoc(doc(db, 'invoices', originalInvoice.id), {
+              estatus: 'Finalizado',
+              complemento: notaActualizada,
+              documento_relacionado: folioCompRef,
+              alerta_complemento_descartada: true,
+              estatus_modificado_manualmente: false,
+              updatedAt: new Date().toISOString()
+            });
+
+            originalInvoice.estatus = 'Finalizado';
+            originalInvoice.complemento = notaActualizada;
+            originalInvoice.documento_relacionado = folioCompRef;
+            originalInvoice.alerta_complemento_descartada = true;
+            vinculadaCount++;
+          }
+        }
+      }
+
+      let msg = isComplement 
+        ? `¡Complemento PDF ${rawFolio} ($0.00) registrado exitosamente!` 
+        : `¡Factura PDF ${rawFolio} registrada exitosamente!`;
+
+      if (ordenDeCompra && !isComplement) {
+        msg += ` Orden de Compra detectada automáticamente: "${ordenDeCompra}".`;
+      }
+
+      if (isComplement) {
+        if (vinculadaCount > 0) {
+          msg += ` Vinculado automáticamente con ${vinculadaCount} factura(s) de ingreso (estatus cambiado a "Finalizado").`;
+        } else if (relatedFolios.length > 0) {
+          msg += ` Folios de documentos relacionados listados en notas: ${relatedFolios.join(', ')}.`;
+        }
+      } else if (existingInv) {
+        msg += ' (Hueco/registro anterior actualizado sin duplicados)';
+      }
+
+      notifyViaServiceWorker(
+        isComplement ? '📄 Complemento de Pago PDF Registrado' : '📄 Factura PDF Registrada',
+        msg,
+        'pdf-upload-' + Date.now()
+      );
+
+      alert(msg);
+    } catch (err) {
+      console.error('Error al procesar PDF:', err);
+      alert('Hubo un error al procesar el archivo PDF. Asegúrate de que no esté protegido por contraseña.');
+    } finally {
+      if (pdfInputRef.current) pdfInputRef.current.value = '';
+    }
+  };
+
   // XML CFDI Upload Handler con detección de folios existentes y actualización de huecos
   const handleXmlUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -2097,6 +2641,13 @@ export default function App() {
     <div className="min-h-screen flex flex-col w-full bg-slate-950 text-slate-100 selection:bg-emerald-500 selection:text-white">
       {/* Hidden file inputs */}
       <input
+        ref={pdfInputRef}
+        type="file"
+        accept=".pdf"
+        onChange={handlePdfUpload}
+        className="hidden"
+      />
+      <input
         ref={xmlInputRef}
         type="file"
         accept=".xml"
@@ -2263,6 +2814,18 @@ export default function App() {
               )}
             </button>
 
+            {/* Descargar Standalone para Netlify */}
+            <button
+              id="downloadStandaloneBtn"
+              type="button"
+              onClick={handleDownloadStandalone}
+              className="px-3 py-2 bg-cyan-950/60 hover:bg-cyan-900/70 text-cyan-300 border border-cyan-500/50 rounded-xl text-xs font-semibold transition-all flex items-center gap-1.5 shadow-sm cursor-pointer whitespace-nowrap shrink-0"
+              title="Descargar index.html autónomo completo sin dependencias listo para Netlify"
+            >
+              <Download className="w-4 h-4 text-cyan-400" />
+              <span>index.html (Netlify)</span>
+            </button>
+
             {/* Cerrar Sesión (Desktop) */}
             <button
               id="logoutBtn"
@@ -2385,24 +2948,41 @@ export default function App() {
           </div>
         </div>
 
-        {/* XML CFDI UPLOADER (GESTIÓN DE HUECOS / CERO DUPLICIDAD) */}
+        {/* SUBIDA INTELIGENTE DE COMPROBANTES CFDI (PDF Y XML) */}
         <div className="bg-slate-900/80 border border-slate-800 rounded-2xl p-4 shadow-lg flex flex-col md:flex-row items-center justify-between gap-4">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 bg-emerald-950/80 border border-emerald-500/40 rounded-xl flex items-center justify-center text-emerald-400 shrink-0">
-              <FileUp className="w-5 h-5" />
+            <div className="w-10 h-10 bg-cyan-950/80 border border-cyan-500/40 rounded-xl flex items-center justify-center text-cyan-400 shrink-0">
+              <FileText className="w-5 h-5" />
             </div>
             <div>
-              <div className="text-sm font-bold text-white">Subir Factura o Complemento CFDI (XML)</div>
+              <div className="text-sm font-bold text-white flex items-center gap-2">
+                <span>Subir Factura o Complemento CFDI (PDF / XML)</span>
+                <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-cyan-500/20 text-cyan-300 border border-cyan-500/30">
+                  Detección OC + Complementos $0.00
+                </span>
+              </div>
               <div className="text-xs text-slate-400">
-                Lectura y cruce inteligente. Si existía un hueco o registro con el mismo folio, se actualiza automáticamente sin crear duplicados.
+                Lectura y cruce inteligente. Detección automática de Orden de Compra (OC) en facturas normales y flujo automático para complementos de pagos ($0.00) con vinculación de facturas relacionadas.
               </div>
             </div>
           </div>
 
-          <div className="flex items-center gap-2 w-full md:w-auto">
+          <div className="flex flex-wrap items-center gap-2 w-full md:w-auto">
+            {/* BOTÓN CARGAR PDF */}
+            <button
+              onClick={() => pdfInputRef.current?.click()}
+              className="w-full sm:w-auto px-4 py-2.5 bg-cyan-600 hover:bg-cyan-500 text-slate-950 font-bold rounded-xl text-xs shadow-md shadow-cyan-950 transition-all flex items-center justify-center gap-2 cursor-pointer"
+              title="Cargar Factura o Complemento de Pago en formato PDF"
+            >
+              <FileText className="w-4 h-4 text-slate-950" />
+              <span>Cargar Archivo PDF</span>
+            </button>
+
+            {/* BOTÓN CARGAR XML */}
             <button
               onClick={() => xmlInputRef.current?.click()}
-              className="w-full md:w-auto px-4 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold shadow-md shadow-emerald-950 transition-all flex items-center justify-center gap-2 cursor-pointer"
+              className="w-full sm:w-auto px-4 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold shadow-md shadow-emerald-950 transition-all flex items-center justify-center gap-2 cursor-pointer"
+              title="Cargar Comprobante CFDI en formato XML"
             >
               <Upload className="w-4 h-4" />
               <span>Cargar Archivo XML</span>
